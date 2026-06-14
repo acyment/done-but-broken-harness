@@ -57,6 +57,8 @@ def run_eval(
     *,
     apply_gold: bool,
     candidate_patch: str | None = None,
+    image: str | None = None,
+    network: str = "none",
     platform: str = "linux/amd64",
     timeout: int = 1800,
 ) -> EvalResult:
@@ -86,9 +88,9 @@ def run_eval(
         )
         proc = subprocess.run(
             [
-                "docker", "run", "--rm", "--platform", platform,
+                "docker", "run", "--rm", "--network", network, "--platform", platform,
                 "-v", f"{td}:/patches:ro",
-                image_name(instance["instance_id"]),
+                image or image_name(instance["instance_id"]),
                 "bash", "-c", script,
             ],
             capture_output=True, text=True, timeout=timeout,
