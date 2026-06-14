@@ -57,6 +57,91 @@ def test_memorization_scoring_and_calibration():
     assert flag_memorized(0.95, thr) and not flag_memorized(0.05, thr)
 
 
+def test_file_path_hit_rate_suffix_match():
+    # doubled repo prefix must still count as a hit (the graphrag under-flag bug)
+    assert file_path_hit_rate(
+        ["graphrag/graphrag/storage/factory.py"], ["graphrag/storage/factory.py"]
+    ) == 1.0
+    # unrelated suffix is a miss
+    assert file_path_hit_rate(["pkg/other.py"], ["pkg/target.py"]) == 0.0
+
+
+_SRC_PATCH = """diff --git a/CONTRIBUTING.rst b/CONTRIBUTING.rst
+--- a/CONTRIBUTING.rst
++++ b/CONTRIBUTING.rst
+@@ -1,3 +1,3 @@ docs
+ line one of prose
+-old prose line
++new prose line
+ line three of prose
+diff --git a/pkg/core.py b/pkg/core.py
+--- a/pkg/core.py
++++ b/pkg/core.py
+@@ -10,4 +10,4 @@ def small(self):
+ a = 1
+-b = 2
++b = 3
+diff --git a/pkg/big.py b/pkg/big.py
+--- a/pkg/big.py
++++ b/pkg/big.py
+@@ -20,12 +20,12 @@ def big(self):
+ first = compute_the_first_value(x, y, z)
+ second = compute_the_second_value(a, b, c)
+ third = combine_first_and_second(first, second)
+-fourth = old_helper_function(third, options)
++fourth = new_helper_function(third, options)
+ fifth = finalize_the_fourth(fourth, context)
+ sixth = persist_to_the_store(fifth, store)
+ seventh = report_the_outcome(sixth, logger)
+ eighth = done_and_cleanup(seventh, resources)
+ ninth = return_the_final(eighth, status)
+"""
+
+
+def test_extract_repro_target_source_only_largest_hunk():
+    from hit_sdd_e2.memorization.probe_exec import extract_repro_target
+
+    t = extract_repro_target(_SRC_PATCH, min_lines=6)
+    # picks the LARGEST python source hunk, never the .rst docs file or the tiny core.py hunk
+    assert t is not None
+    assert t["file"] == "pkg/big.py"
+    assert "compute_the_first_value" in t["actual_code"] and "old_helper_function" in t["actual_code"]
+    # docs-only / tiny diff yields no target
+    docs_only = "\n".join(_SRC_PATCH.splitlines()[:8])
+    assert extract_repro_target(docs_only, min_lines=6) is None
+
+
+def test_strip_fences():
+    from hit_sdd_e2.memorization.probe_exec import _strip_fences
+
+    assert _strip_fences("```python\ncode here\n```") == "code here"
+    assert _strip_fences("no fences\nplain") == "no fences\nplain"
+
+
+def test_code_continuation_probe_split_and_overlap():
+    from hit_sdd_e2.memorization.probe_exec import code_continuation_probe
+
+    inst = {"repo": "x/y", "patch": _SRC_PATCH}
+    # a "memorized" model that echoes the true suffix verbatim -> overlap 1.0
+    seen = {}
+
+    def perfect(prompt):
+        # the prompt embeds the prefix; return the rest of big.py's region verbatim
+        return ("fourth = old_helper_function(third, options)\n"
+                "fifth = finalize_the_fourth(fourth, context)\n"
+                "sixth = persist_to_the_store(fifth, store)\n"
+                "seventh = report_the_outcome(sixth, logger)\n"
+                "eighth = done_and_cleanup(seventh, resources)\n"
+                "ninth = return_the_final(eighth, status)")
+
+    r = code_continuation_probe(inst, perfect)
+    assert r is not None and r["file"] == "pkg/big.py"
+    assert r["continuation_overlap"] > 0.5  # verbatim recall fires
+    # a model that writes unrelated code -> low overlap
+    r2 = code_continuation_probe(inst, lambda p: "completely unrelated tokens with nothing in common")
+    assert r2["continuation_overlap"] == 0.0
+
+
 # --- gate evaluator: A/B only; never NO-GO from absent regressions ---
 def test_gate_go_and_nogo_paths():
     clean_tasks = [

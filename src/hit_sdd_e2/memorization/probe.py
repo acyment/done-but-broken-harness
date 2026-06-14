@@ -9,12 +9,22 @@ post-cutoff NEGATIVE-CONTROL distribution rather than the original fixed guesses
 from __future__ import annotations
 
 
+def _path_suffix(path: str, n: int = 2) -> str:
+    """Last `n` path segments (forward-slash), for prefix-insensitive matching."""
+    return "/".join(path.replace("\\", "/").strip("/").split("/")[-n:])
+
+
 def file_path_hit_rate(predicted_files: list[str], gold_files: list[str]) -> float:
-    """Recall of gold-patch files among the model's issue-only predictions (0..1)."""
-    gold = set(gold_files)
-    if not gold:
+    """Recall of gold files among issue-only predictions (0..1), matched by path SUFFIX.
+
+    Suffix matching avoids under-counting when the model emits a different but valid prefix
+    (e.g. doubled repo dir `graphrag/graphrag/storage/factory.py` vs `graphrag/storage/factory.py`).
+    """
+    if not gold_files:
         return 0.0
-    return len(gold & set(predicted_files)) / len(gold)
+    pred_suffixes = {_path_suffix(p) for p in predicted_files}
+    hits = sum(1 for g in gold_files if _path_suffix(g) in pred_suffixes)
+    return hits / len(gold_files)
 
 
 def _ngrams(text: str, n: int) -> set[tuple[str, ...]]:
