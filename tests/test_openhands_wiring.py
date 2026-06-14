@@ -26,6 +26,13 @@ from hit_sdd_e2.agent.openhands_agent import (  # noqa: E402
 )
 
 ROUTE = {"model": "gpt-4o-mini", "base_url": None}
+DUMMY_INSTANCE = {
+    "instance_id": "x__y-1", "test_cmds": ["pytest -rA"], "base_commit": "abc",
+    "patch": "", "test_patch": "", "FAIL_TO_PASS": "[]", "PASS_TO_PASS": "[]",
+}
+
+# Register the run_tests tool (bound to a dummy instance) so the treatment agent resolves it.
+register_run_tests_tool(DUMMY_INSTANCE, "dummy:image", ["t::a"])
 
 
 def _names(tools):
@@ -50,10 +57,9 @@ def test_bad_arm_rejected():
 
 
 def test_run_tests_tool_registers():
-    register_run_tests_tool()  # idempotent
     from openhands.sdk import list_registered_tools
 
-    assert RUN_TESTS_TOOL_NAME in list_registered_tools()
+    assert RUN_TESTS_TOOL_NAME in list_registered_tools()  # registered at module load above
 
 
 def test_llm_and_agent_construct():

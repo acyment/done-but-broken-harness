@@ -22,3 +22,6 @@ packages = ["src/hit_sdd_e2"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+# OpenHands' transitive deps ship pytest plugins (libtmux's breaks collection on modern pytest;
+# anyio's is unused here). Disable them so the suite is immune whether or not the agent extra is installed.
+addopts = ["-p", "no:libtmux", "-p", "no:anyio"]

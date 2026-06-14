@@ -16,17 +16,20 @@ operator-authorized real run.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from hit_sdd_e2.agent.container_tools import RUN_TESTS_TOOL_NAME, register_run_tests_tool
 from hit_sdd_e2.runner.agent import AgentOutcome
+
+__all__ = [
+    "RUN_TESTS_TOOL_NAME", "register_run_tests_tool",
+    "build_llm", "build_tools", "build_agent", "OpenHandsAgent",
+]
 
 if TYPE_CHECKING:  # keep openhands import optional for the rest of the harness
     from openhands.sdk import LLM, Agent
     from openhands.sdk.tool import Tool
-
-RUN_TESTS_TOOL_NAME = "run_tests"
 
 
 def build_llm(model_route: dict, *, api_key: str) -> "LLM":
@@ -44,39 +47,6 @@ def build_llm(model_route: dict, *, api_key: str) -> "LLM":
         temperature=model_route.get("temperature", 0.0),
         max_output_tokens=model_route.get("max_output_tokens", 4096),
     )
-
-
-def register_run_tests_tool() -> None:
-    """Register the custom `run_tests` ToolDefinition (idempotent).
-
-    The Action/Observation schema and registration are real and validated; the executor that runs
-    the hidden subset in the live workspace is the integration boundary (see module docstring).
-    """
-    from pydantic import Field
-
-    from openhands.sdk.tool import Action, Observation, ToolDefinition, register_tool
-
-    class RunTestsAction(Action):
-        node_ids: list[str] | None = Field(
-            default=None,
-            description="Specific test node-ids to run; defaults to the task's hidden acceptance subset.",
-        )
-
-    class RunTestsObservation(Observation):
-        results: dict[str, str] = Field(description="test node-id -> PASSED/FAILED outcome")
-        summary: str = Field(description="human-readable pass/fail summary")
-
-    class RunTestsTool(ToolDefinition[RunTestsAction, RunTestsObservation]):
-        @classmethod
-        def create(cls, conv_state) -> Sequence["RunTestsTool"]:  # noqa: ANN001 (SDK type)
-            # INTEGRATION BOUNDARY: wire an executor that runs the subset command in
-            # conv_state.workspace and parses pytest -> RunTestsObservation. Validated against a
-            # live runtime (stub-LLM dry run or authorized run), not constructed here.
-            raise NotImplementedError(
-                "run_tests executor wiring is validated against a live OpenHands runtime image"
-            )
-
-    register_tool(RUN_TESTS_TOOL_NAME, RunTestsTool)
 
 
 def build_tools(arm: str) -> list["Tool"]:
@@ -109,12 +79,61 @@ class OpenHandsAgent:
     max_iterations: int = 60
 
     def solve(self, instance: dict, *, arm: str, image: str) -> AgentOutcome:
-        # INTEGRATION BOUNDARY (needs a built runtime image + a real/stub LLM):
-        #   1. provision an OpenHands agent-server runtime on the sanitized `image`;
-        #   2. Conversation(build_agent(build_llm(route), arm), workspace=RemoteWorkspace(host=...));
-        #   3. send the problem_statement, run() up to max_iterations;
-        #   4. extract the patch via `git -C /testbed diff`, parse self-verification from events.
-        raise NotImplementedError(
-            "OpenHandsAgent.solve requires a built runtime image + a real/stub LLM run "
-            "(operator-authorized); config assembly + tool toggle are validated offline."
-        )
+        """Drive OpenHands+LLM on a sanitized checkout; return the patch + self-verification.
+
+        Architecture (validated by examples/real_run_deepseek*.py against DeepSeek V4 Pro): OpenHands
+        runs on the host (LocalWorkspace) editing a `docker cp`-exported sanitized checkout with
+        host-safe tools (file_editor; treatment additionally gets the container-backed `run_tests`).
+        The patch is the working-tree diff; scoring happens in the container via the eval tier.
+
+        NOTE: `declared_done`/`self_verification_passed` are approximated True here; capturing
+        finish-vs-max-iterations and own-test runs from the event stream is a fidelity refinement.
+        """
+        import shutil
+        import subprocess
+        import tempfile
+
+        from openhands.sdk import Agent, Conversation, LocalWorkspace, Tool
+        from openhands.tools.preset.default import get_default_tools
+
+        from hit_sdd_e2.agent.container_tools import register_run_tests_tool
+        from hit_sdd_e2.substrate.swebench_live import _parse_test_list
+
+        workdir = tempfile.mkdtemp(prefix="e2-ws-")
+        try:
+            cid = subprocess.run(
+                ["docker", "create", "--platform", "linux/amd64", image],
+                capture_output=True, text=True, check=True,
+            ).stdout.strip()
+            try:
+                subprocess.run(["docker", "cp", f"{cid}:/testbed/.", workdir],
+                               check=True, capture_output=True)
+            finally:
+                subprocess.run(["docker", "rm", "-f", cid], capture_output=True)
+
+            llm = build_llm(self.model_route, api_key=self.api_key)
+            # host-safe tools: read/edit only (no host shell); treatment adds container-backed run_tests.
+            tools = [t for t in get_default_tools(enable_browser=False) if t.name == "file_editor"]
+            if arm == "treatment":
+                register_run_tests_tool(instance, image, _parse_test_list(instance["FAIL_TO_PASS"]))
+                tools.append(Tool(name=RUN_TESTS_TOOL_NAME))
+            elif arm != "control":
+                raise ValueError(f"arm must be control|treatment, got {arm!r}")
+            agent = Agent(llm=llm, tools=tools, include_default_tools=[])
+
+            conv = Conversation(agent=agent, workspace=LocalWorkspace(working_dir=workdir),
+                                max_iteration_per_run=self.max_iterations)
+            hint = (
+                " You can call the `run_tests` tool to run the hidden acceptance checks against your "
+                "current changes and see pass/fail; iterate until they pass." if arm == "treatment" else ""
+            )
+            conv.send_message(
+                f"Fix the bug in this repository (working dir is the repo root).\n\n"
+                f"Issue:\n{instance['problem_statement']}\n\n"
+                f"Edit the source (not tests).{hint} When done, stop."
+            )
+            conv.run()
+            patch = subprocess.run(["git", "-C", workdir, "diff"], capture_output=True, text=True).stdout
+            return AgentOutcome(patch=patch, declared_done=True, self_verification_passed=True)
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)

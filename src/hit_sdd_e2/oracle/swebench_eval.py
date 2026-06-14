@@ -52,12 +52,35 @@ class EvalResult:
         return self.results.get(node_id)
 
 
+def run_subset(
+    instance: dict,
+    candidate_patch: str,
+    node_ids: list[str],
+    *,
+    image: str | None = None,
+    timeout: int = 600,
+) -> dict[str, str]:
+    """Run a focused set of test node-ids against a candidate patch; return node-id -> outcome.
+
+    This is the treatment-arm `run_tests` primitive: fast (only the acceptance subset), executed in
+    the authoritative sanitized container, returning per-scenario pass/fail (no expected values).
+    """
+    base_cmd = instance["test_cmds"][0] if isinstance(instance["test_cmds"], list) else str(instance["test_cmds"])
+    cmd = f"{base_cmd} {' '.join(node_ids)}" if node_ids else base_cmd
+    res = run_eval(
+        instance, apply_gold=False, candidate_patch=candidate_patch,
+        image=image, command_override=cmd, timeout=timeout,
+    )
+    return {n: (res.outcome_for(n) or "MISSING") for n in node_ids}
+
+
 def run_eval(
     instance: dict,
     *,
     apply_gold: bool,
     candidate_patch: str | None = None,
     image: str | None = None,
+    command_override: str | None = None,
     network: str = "none",
     platform: str = "linux/amd64",
     timeout: int = 1800,
@@ -84,7 +107,7 @@ def run_eval(
             f"git checkout -f {instance['base_commit']} >/dev/null 2>&1 || true\n"
             f"{apply_src}\n"
             "(git apply -v /patches/test.patch || patch -p1 --batch --fuzz=5 < /patches/test.patch)\n"
-            f"{_test_command(instance['test_cmds'])}\n"
+            f"{command_override or _test_command(instance['test_cmds'])}\n"
         )
         proc = subprocess.run(
             [
