@@ -11,3 +11,7 @@ tmp/
 dist/
 build/
 *.egg-info/
+
+# run outputs (authoritative record is in hit-sdd-bench/docs/run-cards)
+e2-phase1-*.json
+e2-phase1-*.run-card.md
