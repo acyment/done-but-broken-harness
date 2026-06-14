@@ -39,10 +39,20 @@ def build_sanitized_image(
     base_commit: str,
     out_tag: str,
     platform: str = "linux/amd64",
+    prebake_warm_cmd: str | None = None,
+    prebake_timeout: int = 1200,
 ) -> str:
     """Apply sanitization to `base_image` and commit a derived image `out_tag`. Returns its Id.
 
     The agent and oracle then run on the sanitized image with `--network none`.
+
+    Many SWE-bench Live images install dependencies from the network at TEST time (`uv run`,
+    `tox`, `pip install -e .`), so they cannot run under the sealed offline run-time policy. If
+    `prebake_warm_cmd` is given, a one-off step runs it WITH network (build time only) to populate the
+    project venv / dependency cache, then commits — so every RUN-TIME container still runs at
+    `--network none` exactly as sealed. The run-time policy is unchanged; only the image becomes
+    self-contained (and its hash is recorded for provenance). Pair with `UV_OFFLINE=1` at run time
+    (see `run_eval`). Git sanitization happens BEFORE the warm so no future-history leak is reintroduced.
     """
     cname = f"e2-sanitize-{uuid.uuid4().hex[:12]}"
     try:
@@ -52,6 +62,15 @@ def build_sanitized_image(
             check=True, capture_output=True, text=True,
         )
         subprocess.run(["docker", "commit", cname, out_tag], check=True, capture_output=True, text=True)
+        if prebake_warm_cmd:
+            subprocess.run(["docker", "rm", "-f", cname], capture_output=True, text=True)
+            # warm step: network ON, build time only — populate venv/dep cache, then re-commit.
+            subprocess.run(
+                ["docker", "run", "--name", cname, "--network", "bridge", "--platform", platform,
+                 out_tag, "bash", "-c", f"cd /testbed && ({prebake_warm_cmd}) >/dev/null 2>&1 || true"],
+                check=True, capture_output=True, text=True, timeout=prebake_timeout,
+            )
+            subprocess.run(["docker", "commit", cname, out_tag], check=True, capture_output=True, text=True)
     finally:
         subprocess.run(["docker", "rm", "-f", cname], capture_output=True, text=True)
     inspect = subprocess.run(

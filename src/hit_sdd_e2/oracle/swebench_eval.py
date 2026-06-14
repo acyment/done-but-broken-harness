@@ -109,9 +109,13 @@ def run_eval(
             "(git apply -v /patches/test.patch || patch -p1 --batch --fuzz=5 < /patches/test.patch)\n"
             f"{command_override or _test_command(instance['test_cmds'])}\n"
         )
+        # When running offline (sealed policy), force uv into offline mode so a PREBAKED image uses
+        # its warmed venv/cache instead of hitting PyPI. Harmless for non-uv tasks. No-op online.
+        offline_env = ["-e", "UV_OFFLINE=1"] if network == "none" else []
         proc = subprocess.run(
             [
                 "docker", "run", "--rm", "--network", network, "--platform", platform,
+                *offline_env,
                 "-v", f"{td}:/patches:ro",
                 image or image_name(instance["instance_id"]),
                 "bash", "-c", script,
