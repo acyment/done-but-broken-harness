@@ -86,14 +86,17 @@ class OpenHandsAgent:
         host-safe tools (file_editor; treatment additionally gets the container-backed `run_tests`).
         The patch is the working-tree diff; scoring happens in the container via the eval tier.
 
-        NOTE: `declared_done`/`self_verification_passed` are approximated True here; capturing
-        finish-vs-max-iterations and own-test runs from the event stream is a fidelity refinement.
+        `declared_done` is captured from the conversation status: the agent declares done by calling
+        the built-in `finish` tool, which sets `execution_status == FINISHED`; max-iterations/stuck
+        leaves it otherwise. `self_verification_passed` is set equal to `declared_done` (an agent that
+        finishes believes itself correct; one that maxes/stalls makes no such claim), so the
+        self-verification gap = oracle-would-fail AND the agent declared done — genuine false confidence.
         """
         import shutil
         import subprocess
         import tempfile
 
-        from openhands.sdk import Agent, Conversation, LocalWorkspace, Tool
+        from openhands.sdk import Agent, Conversation, ConversationExecutionStatus, LocalWorkspace, Tool
         from openhands.tools.preset.default import get_default_tools
 
         from hit_sdd_e2.agent.container_tools import register_run_tests_tool
@@ -133,7 +136,10 @@ class OpenHandsAgent:
                 f"Edit the source (not tests).{hint} When done, stop."
             )
             conv.run()
+            declared_done = conv.state.execution_status == ConversationExecutionStatus.FINISHED
             patch = subprocess.run(["git", "-C", workdir, "diff"], capture_output=True, text=True).stdout
-            return AgentOutcome(patch=patch, declared_done=True, self_verification_passed=True)
+            return AgentOutcome(
+                patch=patch, declared_done=declared_done, self_verification_passed=declared_done
+            )
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
