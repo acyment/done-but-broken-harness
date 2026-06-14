@@ -5,6 +5,10 @@ description = "E2 brownfield acceptance-feedback ablation harness (Python/Docker
 requires-python = ">=3.12"
 dependencies = []
 
+[project.optional-dependencies]
+data = ["datasets"]            # substrate adapter (SWE-bench Live)
+agent = ["openhands-ai>=1.8"]  # OpenHands Agent SDK scaffold
+
 [dependency-groups]
 dev = ["pytest>=8"]
 
