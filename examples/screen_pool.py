@@ -36,8 +36,10 @@ from hit_sdd_e2.memorization.probe_exec import (  # noqa: E402
     file_path_id_probe,
 )
 
-POOL = "/Users/acyment/dev/hit-sdd-bench/docs/protocols/e2-phase1-5-candidate-pool-v1.json"
-RUN_ID = "e2-phase1-5-pool-screen-deepseek-v4-pro-20260614-001"
+POOL = os.environ.get(
+    "E2_SCREEN_POOL",
+    "/Users/acyment/dev/hit-sdd-bench/docs/protocols/e2-phase1-5-candidate-pool-v1.json")
+RUN_ID = os.environ.get("E2_SCREEN_RUN_ID", "e2-phase1-5-pool-screen-deepseek-v4-pro-20260614-001")
 OUT = f"{RUN_ID}.json"
 HIGH_LOCALIZATION = 0.75  # precautionary file-path-recall exclusion bar
 # The cross-task null is degenerate (≈0): different repos share almost no 5-grams, so it cannot see

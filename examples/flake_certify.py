@@ -10,6 +10,8 @@ Usage: uv run --extra data python examples/flake_certify.py [--n 60] [--est-cap 
 
 import json
 import os
+import shutil
+import subprocess
 import sys
 import time
 
@@ -20,7 +22,18 @@ from hit_sdd_e2.oracle.swebench_eval import image_name
 from hit_sdd_e2.sanitize.snapshot import build_sanitized_image
 
 SMOKE = "e2-phase1-5-flake-smoke-20260614-001.json"
-OUT = "e2-phase1-5-flake-certify-20260614-001.json"
+OUT = os.environ.get("E2_CERTIFY_OUT", "e2-phase1-5-flake-certify-20260614-001.json")
+MIN_FREE_GB = float(os.environ.get("E2_MIN_FREE_GB", "8"))
+
+
+def _free_gb() -> float:
+    return shutil.disk_usage(os.path.expanduser("~")).free / 2**30
+
+
+def _reclaim(tid: str) -> None:
+    """Free this task's images so a long N=60 cert run can't fill the host disk."""
+    for img in (f"e2-sanitized:{tid}", image_name(tid)):
+        subprocess.run(["docker", "rmi", "-f", img], capture_output=True, text=True)
 
 
 def parse_args(argv):
@@ -53,11 +66,20 @@ def main() -> None:
 
     results = list(done.values())
     for tid in todo:
+        free = _free_gb()
+        if free < MIN_FREE_GB:
+            print(f"ABORT: only {free:.1f} GiB free (< {MIN_FREE_GB}); stopping before {tid}.",
+                  flush=True)
+            break
         inst = by_id[tid]
+        tc = inst["test_cmds"]
+        warm = tc if isinstance(tc, str) else " && ".join(tc)
         t0 = time.monotonic()
         try:
+            # prebake deps so the offline (network=none) cert runs work for uv/tox/pip-install images
             sanitized = build_sanitized_image(image_name(tid), inst["base_commit"],
-                                              f"e2-sanitized:{tid}")
+                                              f"e2-sanitized:{tid}", prebake_warm_cmd=warm,
+                                              prebake_timeout=1500)
             rep = certify_task(inst, sanitized, n=n, timeout=1500, progress=True)
             rec = {"instance_id": tid, "wall_min": round((time.monotonic() - t0) / 60, 1),
                    **{k: rep[k] for k in ("completed_runs", "requested_runs", "total_tests",
@@ -66,6 +88,8 @@ def main() -> None:
         except Exception as e:  # noqa: BLE001
             rec = {"instance_id": tid, "error": str(e)[:200],
                    "wall_min": round((time.monotonic() - t0) / 60, 1), "flake_certified": False}
+        finally:
+            _reclaim(tid)
         results.append(rec)
         json.dump({"run_id": "e2-phase1-5-flake-certify-20260614-001",
                    "classification": "calibration", "n": n, "results": results},
