@@ -7,6 +7,7 @@ Usage: uv run --extra data python examples/flake_smoke_prebaked.py [id ...]
 """
 
 import json
+import os
 import sys
 import time
 
@@ -15,7 +16,8 @@ from datasets import load_dataset
 from hit_sdd_e2.oracle.swebench_eval import image_name, run_eval
 from hit_sdd_e2.sanitize.snapshot import build_sanitized_image
 
-OUT = "e2-phase1-5-flake-smoke-prebaked-20260614-001.json"
+OUT = os.environ.get("E2_SMOKE_OUT", "e2-phase1-5-flake-smoke-prebaked-20260614-001.json")
+TIMEOUT = int(os.environ.get("E2_SMOKE_TIMEOUT", "1500"))  # per warm and per gold run; fail fast on hangs
 # previously non-clean tasks from the offline smoke (infeasible-network + dirty)
 DEFAULT = [
     "a2aproject__a2a-python-443", "openai__openai-agents-python-1601",
@@ -40,8 +42,8 @@ def main() -> None:
         try:
             img = build_sanitized_image(image_name(tid), inst["base_commit"],
                                         f"e2-prebaked:{tid}", prebake_warm_cmd=warm,
-                                        prebake_timeout=1500)
-            res = run_eval(inst, apply_gold=True, image=img, network="none", timeout=1500)
+                                        prebake_timeout=TIMEOUT)
+            res = run_eval(inst, apply_gold=True, image=img, network="none", timeout=TIMEOUT)
             n = len(res.results)
             passed = sum(1 for v in res.results.values() if v == "PASSED")
             failed = sum(1 for v in res.results.values() if v in ("FAILED", "ERROR"))
