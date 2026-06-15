@@ -8,11 +8,19 @@ Usage: uv run --extra data python examples/flake_smoke_prebaked.py [id ...]
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
 
 from datasets import load_dataset
+
+MIN_FREE_GB = float(os.environ.get("E2_MIN_FREE_GB", "8"))
+
+
+def _free_gb() -> float:
+    """Free GiB on the volume holding the OrbStack/Docker data (the user's home volume)."""
+    return shutil.disk_usage(os.path.expanduser("~")).free / 2**30
 
 from hit_sdd_e2.oracle.swebench_eval import image_name, run_eval
 from hit_sdd_e2.sanitize.snapshot import build_sanitized_image
@@ -42,6 +50,11 @@ def main() -> None:
 
     results = []
     for tid in ids:
+        free = _free_gb()
+        if free < MIN_FREE_GB:
+            print(f"ABORT: only {free:.1f} GiB free (< {MIN_FREE_GB}); stopping before {tid} "
+                  f"to protect the host disk.", flush=True)
+            break
         inst = by_id[tid]
         tc = inst["test_cmds"]
         warm = tc if isinstance(tc, str) else " && ".join(tc)
