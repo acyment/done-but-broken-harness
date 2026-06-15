@@ -8,6 +8,7 @@ Usage: uv run --extra data python examples/flake_smoke_prebaked.py [id ...]
 
 import json
 import os
+import subprocess
 import sys
 import time
 
@@ -15,6 +16,13 @@ from datasets import load_dataset
 
 from hit_sdd_e2.oracle.swebench_eval import image_name, run_eval
 from hit_sdd_e2.sanitize.snapshot import build_sanitized_image
+
+
+def _reclaim(tid: str) -> None:
+    """Remove this task's eval + prebaked images so a long smoke can't fill the disk.
+    Each SWE-bench image is multi-GB; without this, N pulls exhaust the host volume."""
+    for img in (f"e2-prebaked:{tid}", image_name(tid)):
+        subprocess.run(["docker", "rmi", "-f", img], capture_output=True, text=True)
 
 OUT = os.environ.get("E2_SMOKE_OUT", "e2-phase1-5-flake-smoke-prebaked-20260614-001.json")
 TIMEOUT = int(os.environ.get("E2_SMOKE_TIMEOUT", "1500"))  # per warm and per gold run; fail fast on hangs
@@ -53,6 +61,8 @@ def main() -> None:
         except Exception as e:  # noqa: BLE001
             rec.update({"ok": False, "error": str(e)[:160],
                         "wall_s": round(time.monotonic() - t0, 1)})
+        finally:
+            _reclaim(tid)  # always free this task's images before the next pull
         results.append(rec)
         verdict = ("CLEAN" if rec.get("ok") and rec.get("failed") == 0
                    else "near" if rec.get("ok") and rec.get("failed", 99) <= 2
