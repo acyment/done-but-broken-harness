@@ -42,7 +42,7 @@ def _fake_scorer(instance, patch, *, arm, declared_done, self_verification_passe
 def test_runner_shape_and_concurrency_invariance():
     tasks = [Phase15Task(INST)]
     kw = dict(run_id="t", model_route="m", runs_per_arm=5,
-              scorer=_fake_scorer, image_builder=_fake_image)
+              scorer=_fake_scorer, image_builder=_fake_image, compute_gold_quarantine=False)
     serial = run_phase1_5(tasks, _ArmAgent(), agent_concurrency=1, score_concurrency=1, **kw)
     par = run_phase1_5(tasks, _ArmAgent(), agent_concurrency=4, score_concurrency=2, **kw)
     # 1 task * 2 arms * 5 runs = 10 records, regardless of concurrency
@@ -54,6 +54,26 @@ def test_runner_shape_and_concurrency_invariance():
     assert s["control"]["gap_rate"] == 1.0 and s["treatment"]["gap_rate"] == 0.0
 
 
+def test_checkpoint_resume_skips_done_tasks(tmp_path):
+    cp = str(tmp_path / "cp.json")
+    t1 = Phase15Task({**INST, "instance_id": "a"})
+    t2 = Phase15Task({**INST, "instance_id": "b"})
+    kw = dict(run_id="t", model_route="m", runs_per_arm=2, scorer=_fake_scorer,
+              image_builder=_fake_image, compute_gold_quarantine=False, checkpoint_path=cp)
+    run_phase1_5([t1], _ArmAgent(), **kw)  # checkpoint now has task 'a'
+
+    calls = {"n": 0}
+
+    class _CountingAgent(_ArmAgent):
+        def solve(self, instance, *, arm, image):
+            calls["n"] += 1
+            return super().solve(instance, arm=arm, image=image)
+
+    out = run_phase1_5([t1, t2], _CountingAgent(), **kw)  # resume: 'a' skipped, only 'b' runs
+    assert calls["n"] == 4  # only task b: 2 arms * 2 runs (a was resumed from checkpoint)
+    assert {r["instance_id"] for r in out["records"] if "arm" in r} == {"a", "b"}
+
+
 def test_quarantine_passes_through_to_scorer():
     seen = {}
 
@@ -63,7 +83,7 @@ def test_quarantine_passes_through_to_scorer():
 
     run_phase1_5([Phase15Task(INST, quarantine=frozenset({"flaky::t"}))], _ArmAgent(),
                  run_id="t", model_route="m", runs_per_arm=1,
-                 scorer=spy_scorer, image_builder=_fake_image)
+                 scorer=spy_scorer, image_builder=_fake_image, compute_gold_quarantine=False)
     assert seen["q"] == frozenset({"flaky::t"})
 
 

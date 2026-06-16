@@ -18,6 +18,7 @@ MockAgent. The real-agent path (OpenHands + DeepSeek) is the only operator-autho
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -25,10 +26,11 @@ from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
-from hit_sdd_e2.oracle.swebench_eval import image_name
+from hit_sdd_e2.oracle.swebench_eval import image_name, run_eval
 from hit_sdd_e2.runner.agent import Agent, AgentOutcome
 from hit_sdd_e2.runner.scoring import ScoreRecord, score_candidate
 from hit_sdd_e2.sanitize.snapshot import build_sanitized_image
+from hit_sdd_e2.substrate.swebench_live import _parse_test_list
 
 
 @dataclass(frozen=True)
@@ -36,8 +38,16 @@ class Phase15Task:
     """One flake-certified task plus its scoring quarantine and dependency-warm command."""
 
     instance: dict
-    quarantine: frozenset[str] = frozenset()  # cert-flaky + deterministically-fail-under-gold tests
+    quarantine: frozenset[str] = frozenset()  # KNOWN excludes (cert-flaky); gold-fail added at run time
     warm_cmd: str | None = None  # prebake dependency-warm (test_cmds); None = image already self-contained
+
+
+def _gold_fail_quarantine(instance: dict, image: str, timeout: int) -> frozenset[str]:
+    """P2P tests that fail deterministically under the gold patch in THIS container (env-sensitive,
+    not valid PASS_TO_PASS here). Computed once per task on the live image; excluded from scoring."""
+    gold = run_eval(instance, apply_gold=True, image=image, timeout=timeout)
+    p2p = _parse_test_list(instance.get("PASS_TO_PASS"))
+    return frozenset(t for t in p2p if gold.outcome_for(t) in ("FAILED", "ERROR"))
 
 
 def _free_gb() -> float:
@@ -74,25 +84,45 @@ def run_phase1_5(
     image_builder: Callable = build_sanitized_image,
     min_free_gb: float = 10.0,
     score_timeout: int = 1800,
+    compute_gold_quarantine: bool = True,
+    checkpoint_path: str | None = None,
     progress: bool = False,
 ) -> dict:
     """Run control vs treatment, N=`runs_per_arm`/arm/task, bounded-parallel. Returns records + summary.
 
     Disk-guarded (aborts a task's start below `min_free_gb`); each task's image is built once, reused
-    across its 2*N rollouts, then reclaimed. The permutation analysis is a separate step (`analysis`).
+    across its 2*N rollouts, then reclaimed. Resumable: tasks already in `checkpoint_path` are skipped
+    and the file is rewritten after each task (so a crash mid-run keeps the completed, paid rollouts).
+    The permutation analysis is a separate step (`phase1_5_analysis`).
     """
-    records: list[dict] = []
     arms = ("control", "treatment")
+    records: list[dict] = []
+    done_ids: set[str] = set()
+    if checkpoint_path and os.path.exists(checkpoint_path):
+        records = json.load(open(checkpoint_path)).get("records", [])
+        done_ids = {r["instance_id"] for r in records if "arm" in r}
+
+    def _flush():
+        if checkpoint_path:
+            json.dump({"run_id": run_id, "records": records,
+                       "summary": summarize(records, runs_per_arm)},
+                      open(checkpoint_path, "w"), indent=1)
 
     for task in tasks:
         inst = task.instance
         iid = inst["instance_id"]
+        if iid in done_ids:  # resume: skip completed tasks
+            continue
         if _free_gb() < min_free_gb:
             records.append({"instance_id": iid, "skipped": f"low disk ({_free_gb():.1f} GiB)"})
+            _flush()
             break
         image = image_builder(image_name(iid), inst["base_commit"], f"e2-prebaked:{iid}",
                               prebake_warm_cmd=task.warm_cmd)
         try:
+            quarantine = task.quarantine
+            if compute_gold_quarantine:
+                quarantine = quarantine | _gold_fail_quarantine(inst, image, score_timeout)
             items = [(arm, r) for arm in arms for r in range(runs_per_arm)]
 
             # Phase A — agent rollouts, parallel (independent, nondeterministic agent).
@@ -102,7 +132,7 @@ def run_phase1_5(
             outcomes: list[AgentOutcome] = _bounded_map(_rollout, items, agent_concurrency)
 
             # Phase B — oracle scoring, controlled concurrency (preserve cert determinism).
-            def _score(pair, _inst=inst, _image=image, _q=task.quarantine):
+            def _score(pair, _inst=inst, _image=image, _q=quarantine):
                 (arm, _r), out = pair
                 return scorer(_inst, out.patch, arm=arm, declared_done=out.declared_done,
                               self_verification_passed=out.self_verification_passed,
@@ -111,14 +141,16 @@ def run_phase1_5(
                 _score, list(zip(items, outcomes)), score_concurrency)
 
             for (arm, r), sr in zip(items, scored):
-                records.append({"instance_id": iid, "arm": arm, "run": r,
-                                "run_id": run_id, "model_route": model_route, **sr.to_dict()})
+                records.append({"instance_id": iid, "arm": arm, "run": r, "run_id": run_id,
+                                "model_route": model_route, "n_quarantined": len(quarantine),
+                                **sr.to_dict()})
             if progress:
                 g = {a: _arm_gap_rate(scored, a) for a in arms}
                 print(f"  {iid:<46} gap control={g['control']:.2f} treatment={g['treatment']:.2f} "
-                      f"(free {_free_gb():.0f}GiB)", flush=True)
+                      f"quarantine={len(quarantine)} (free {_free_gb():.0f}GiB)", flush=True)
         finally:
             _reclaim(iid)
+        _flush()  # checkpoint after each completed task
 
     return {"run_id": run_id, "records": records, "summary": summarize(records, runs_per_arm)}
 
