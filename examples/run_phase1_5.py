@@ -13,9 +13,17 @@ Usage (authorized): E2_AUTHORIZE_PHASE15=1 DEEPSEEK_API_KEY=... uv run --extra a
                         python examples/run_phase1_5.py [--n 10] [--agent-cc 4] [--score-cc 1]
 """
 
+import faulthandler
 import json
 import os
+import signal
 import sys
+
+# Dump ALL thread stacks to stderr (-> the run log) on SIGUSR1, so the hang watchdog can catch a
+# deadlock red-handed without sudo/py-spy. Also dump on a fatal fault. macOS/Unix only.
+faulthandler.enable()
+if hasattr(signal, "SIGUSR1"):
+    faulthandler.register(signal.SIGUSR1, all_threads=True, chain=False)
 
 CERTIFIED = [
     "spulec__freezegun-582", "pypa__twine-1249", "casbin__pycasbin-392",
@@ -44,7 +52,8 @@ def main() -> None:
     agent_cc = _arg("--agent-cc", 4)
     score_cc = _arg("--score-cc", 1)
     limit = _arg("--limit", len(CERTIFIED))  # smoke a few tasks first before the full 13
-    task_ids = CERTIFIED[:limit]
+    only = _arg("--tasks", "")  # comma-sep instance_ids to run exactly these (else CERTIFIED[:limit])
+    task_ids = [t for t in only.split(",") if t in CERTIFIED] if only else CERTIFIED[:limit]
     authorized = os.environ.get("E2_AUTHORIZE_PHASE15") == "1" and os.environ.get("DEEPSEEK_API_KEY")
 
     rollouts = len(task_ids) * 2 * n
