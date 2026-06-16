@@ -87,6 +87,22 @@ def test_quarantine_passes_through_to_scorer():
     assert seen["q"] == frozenset({"flaky::t"})
 
 
+def test_failing_rollout_is_recorded_as_error_not_crash():
+    class _BoomAgent:
+        def solve(self, instance, *, arm, image):
+            raise RuntimeError("LLM boom")
+
+    out = run_phase1_5([Phase15Task(INST)], _BoomAgent(), run_id="t", model_route="m",
+                       runs_per_arm=2, scorer=_fake_scorer, image_builder=_fake_image,
+                       compute_gold_quarantine=False, rollout_retries=1)
+    recs = [r for r in out["records"] if "arm" in r]
+    assert len(recs) == 4 and all(r.get("error") for r in recs)  # no crash; all marked error
+    # errored rollouts are excluded from the per-task summary (no valid runs)
+    assert out["summary"]["per_task"].get("demo__demo-1") is None
+    from hit_sdd_e2.orchestrate.phase1_5_analysis import family_wise
+    assert family_wise(out["records"])["n_tasks"] == 0
+
+
 def test_summarize_rates():
     recs = [{"instance_id": "x", "arm": "control", "self_verification_gap": True, "resolved": False},
             {"instance_id": "x", "arm": "control", "self_verification_gap": False, "resolved": True},

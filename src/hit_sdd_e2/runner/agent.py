@@ -21,6 +21,7 @@ class AgentOutcome:
     patch: str  # unified diff the agent produced ("" = no change)
     declared_done: bool
     self_verification_passed: bool  # the agent's OWN tests passed / it believed itself correct
+    error: str | None = None  # set if the rollout failed (LLM/tool error); excluded from analysis
 
 
 class Agent(Protocol):

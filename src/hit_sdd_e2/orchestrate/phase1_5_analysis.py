@@ -90,8 +90,8 @@ def family_wise(records: list[dict], *, alpha: float = 0.05, mcid: float = 0.20,
     """
     by_task: dict[str, dict[str, list[int]]] = {}
     for rec in records:
-        if "arm" not in rec:
-            continue
+        if "arm" not in rec or rec.get("error") or rec.get("self_verification_gap") is None:
+            continue  # skip errored rollouts
         t = by_task.setdefault(rec["instance_id"], {"control": [], "treatment": []})
         t[rec["arm"]].append(int(rec["self_verification_gap"]))
 
