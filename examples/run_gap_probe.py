@@ -18,6 +18,7 @@ import os
 import shutil
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 
 HARD_TASKS = {  # task -> DeepSeek CONTROL gap, for comparison
     "pypa__twine-1249": 1.00,
@@ -41,12 +42,16 @@ def main() -> None:
     backend = sys.argv[sys.argv.index("--backend") + 1] if "--backend" in sys.argv else "codex"
     run = "--run" in sys.argv
     n = int(sys.argv[sys.argv.index("--n") + 1]) if "--n" in sys.argv else 5
+    concurrency = int(sys.argv[sys.argv.index("--concurrency") + 1]) if "--concurrency" in sys.argv else 2
     if backend not in BACKENDS:
         print(f"--backend must be one of {list(BACKENDS)}; got {backend!r}")
         return
     out_path = f"e2-{backend}-gap-probe-20260616-001.json"
-    print(f"{backend} gap probe: {len(HARD_TASKS)} hard tasks x {n} runs = {len(HARD_TASKS) * n} rollouts")
+    print(f"{backend} gap probe: {len(HARD_TASKS)} hard tasks x {n} runs = {len(HARD_TASKS) * n} rollouts "
+          f"(concurrency={concurrency})")
     print("  single condition (vendor CLI as-is); scored by our hidden oracle; measures self-verification gap")
+    if concurrency > 3:
+        print(f"  WARNING: concurrency={concurrency} may trip subscription rate limits; 2-3 recommended")
     cli = BACKENDS[backend]
     if not shutil.which(cli):
         print(f"\n`{cli}` not found on PATH — install/login to the {backend} CLI first. Nothing run.")
@@ -78,17 +83,25 @@ def main() -> None:
                                       prebake_warm_cmd=warm)
         try:
             q = _gold_fail_quarantine(inst, image, 1800)
-            gaps = resolved = errors = 0
-            for _ in range(n):
-                o = agent.solve(inst, image=image)
+
+            def _rollout(_, _inst=inst, _image=image, _q=q):
+                o = agent.solve(_inst, image=_image)
                 if o.error:
-                    errors += 1
-                    continue
-                sr = score_candidate(inst, o.patch, arm=backend, declared_done=o.declared_done,
+                    return ("error", None)
+                sr = score_candidate(_inst, o.patch, arm=backend, declared_done=o.declared_done,
                                      self_verification_passed=o.self_verification_passed,
-                                     image=image, quarantine=q)
-                gaps += int(sr.self_verification_gap)
-                resolved += int(sr.resolved)
+                                     image=_image, quarantine=_q)
+                return ("ok", sr)
+
+            # bounded-parallel rollouts (cap by subscription rate limits, not compute)
+            if concurrency <= 1:
+                results = [_rollout(i) for i in range(n)]
+            else:
+                with ThreadPoolExecutor(max_workers=concurrency) as ex:
+                    results = list(ex.map(_rollout, range(n)))
+            errors = sum(1 for k, _ in results if k == "error")
+            gaps = sum(1 for k, sr in results if k == "ok" and sr.self_verification_gap)
+            resolved = sum(1 for k, sr in results if k == "ok" and sr.resolved)
             valid = n - errors
             rec = {"instance_id": tid, "backend": backend, "n": n, "valid": valid, "errors": errors,
                    "gap_rate": (gaps / valid) if valid else None,
