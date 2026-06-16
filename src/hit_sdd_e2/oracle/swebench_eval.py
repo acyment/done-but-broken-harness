@@ -12,9 +12,10 @@ Host may be arm64 → images are x86_64, run under emulation (`--platform linux/
 from __future__ import annotations
 
 import re
-import shlex
 import subprocess
 import tempfile
+import threading
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -103,35 +104,36 @@ def run_eval(
             if source_patch
             else ":"
         )
-        # Cap the test run INSIDE the container with coreutils `timeout`: a hung suite (e.g. a broken
-        # candidate patch that infinite-loops) self-terminates so `docker run` exits cleanly. This is
-        # the real fix for the observed "hang" — Python's subprocess `timeout` CANNOT interrupt
-        # `docker run` (it SIGKILLs the client, the container keeps the stdout pipe open, and the
-        # post-kill communicate() blocks forever). `inner` sits below the outer subprocess timeout so
-        # the container self-kills first. A killed suite -> non-zero rc -> scored as not-resolved
-        # (deterministic), which is correct: a patch that hangs the tests is a failed fix.
-        test_cmd = command_override or _test_command(instance["test_cmds"])
-        inner = max(60, timeout - 60)
         script = (
             "cd /testbed\n"
             f"git checkout -f {instance['base_commit']} >/dev/null 2>&1 || true\n"
             f"{apply_src}\n"
             "(git apply -v /patches/test.patch || patch -p1 --batch --fuzz=5 < /patches/test.patch)\n"
-            f"timeout -s KILL {inner} bash -c {shlex.quote(test_cmd)}\n"
+            f"{command_override or _test_command(instance['test_cmds'])}\n"
         )
         # When running offline (sealed policy), force uv into offline mode so a PREBAKED image uses
         # its warmed venv/cache instead of hitting PyPI. Harmless for non-uv tasks. No-op online.
         offline_env = ["-e", "UV_OFFLINE=1"] if network == "none" else []
-        proc = subprocess.run(
-            [
-                "docker", "run", "--rm", "--network", network, "--platform", platform,
-                *offline_env,
-                "-v", f"{td}:/patches:ro",
-                image or image_name(instance["instance_id"]),
-                "bash", "-c", script,
-            ],
-            capture_output=True, text=True, timeout=timeout,
-        )
+        # The timeout is enforced by `docker kill` on a NAMED container, NOT subprocess's timeout:
+        # subprocess's timeout can't stop `docker run` (it kills the client; the container keeps the
+        # stdout pipe open and the post-kill communicate() blocks forever — the diagnosed deadlock).
+        # `docker kill` authoritatively SIGKILLs every process in the container, closing the pipe so
+        # communicate() returns. A killed suite -> non-zero rc -> scored not-resolved (correct: a
+        # patch that hangs the tests is a failed fix).
+        cname = f"e2eval-{uuid.uuid4().hex[:12]}"
+        docker_cmd = [
+            "docker", "run", "--rm", "--name", cname, "--network", network, "--platform", platform,
+            *offline_env, "-v", f"{td}:/patches:ro",
+            image or image_name(instance["instance_id"]), "bash", "-c", script,
+        ]
+        killer = threading.Timer(
+            timeout, lambda: subprocess.run(["docker", "kill", cname], capture_output=True, text=True))
+        killer.start()
+        try:
+            proc = subprocess.run(docker_cmd, capture_output=True, text=True)
+        finally:
+            killer.cancel()
+            subprocess.run(["docker", "rm", "-f", cname], capture_output=True, text=True)
     return EvalResult(
         returncode=proc.returncode,
         results=parse_pytest_results(proc.stdout),
