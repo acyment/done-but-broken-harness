@@ -61,10 +61,16 @@ def score_candidate(
     image: str | None = None,
     network: str = "none",
     timeout: int = 1800,
+    quarantine: frozenset[str] = frozenset(),
 ) -> ScoreRecord:
-    """Run the candidate patch through the oracle and compute the scoring + self-verification gap."""
-    f2p = _parse_test_list(instance.get("FAIL_TO_PASS"))
-    p2p = _parse_test_list(instance.get("PASS_TO_PASS"))
+    """Run the candidate patch through the oracle and compute the scoring + self-verification gap.
+
+    `quarantine` lists tests excluded from the scored surface — the flaky tests the N=60 cert
+    quarantined PLUS tests that fail deterministically under the gold patch in this container
+    (env-sensitive, not valid PASS_TO_PASS here). Excluding them prevents false regressions.
+    """
+    f2p = [t for t in _parse_test_list(instance.get("FAIL_TO_PASS")) if t not in quarantine]
+    p2p = [t for t in _parse_test_list(instance.get("PASS_TO_PASS")) if t not in quarantine]
     res = run_eval(
         instance,
         apply_gold=False,
