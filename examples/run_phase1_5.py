@@ -87,9 +87,12 @@ def main() -> None:
                          warm_cmd=warm_of(by_id[tid])) for tid in task_ids]
 
     agent = OpenHandsAgent(model_route=MODEL_ROUTE, api_key=os.environ["DEEPSEEK_API_KEY"])
+    # scoring timeout: a legit suite-run on these tasks is seconds-to-minutes; >10min means a broken
+    # candidate patch hung the suite (the diagnosed "hang"). Fail fast -> excluded error, run continues.
+    score_timeout = _arg("--score-timeout", 600)
     out = run_phase1_5(tasks, agent, run_id=RUN_ID, model_route=MODEL_ROUTE["model"],
                        runs_per_arm=n, agent_concurrency=agent_cc, score_concurrency=score_cc,
-                       checkpoint_path=f"{RUN_ID}.json", progress=True)
+                       score_timeout=score_timeout, checkpoint_path=f"{RUN_ID}.json", progress=True)
     out["analysis"] = family_wise(out["records"])
     json.dump(out, open(f"{RUN_ID}.json", "w"), indent=1)
     a = out["analysis"]
