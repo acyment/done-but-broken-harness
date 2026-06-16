@@ -46,6 +46,11 @@ def build_llm(model_route: dict, *, api_key: str) -> "LLM":
         api_key=api_key,
         temperature=model_route.get("temperature", 0.0),
         max_output_tokens=model_route.get("max_output_tokens", 4096),
+        # A stalled provider stream must not hang a rollout forever (it froze the first full run on a
+        # heavy task at 0% CPU). Bound each call + retry; persistent failure -> the runner records an
+        # error outcome (excluded from analysis) rather than hanging the ThreadPoolExecutor.
+        timeout=model_route.get("timeout", 300),
+        num_retries=model_route.get("num_retries", 3),
     )
 
 
