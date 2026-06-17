@@ -144,6 +144,8 @@ def run_phase1_5(
             # rollouts skip scoring; scoring failures are also recorded as errors, never raised.
             def _score(pair, _inst=inst, _image=image, _q=quarantine):
                 (arm, _r), out = pair
+                if progress:  # per-scoring heartbeat so the scoring phase isn't log-silent
+                    print(f"    score {_inst['instance_id']} {arm}/{_r}", flush=True)
                 if out.error:
                     return None
                 try:
