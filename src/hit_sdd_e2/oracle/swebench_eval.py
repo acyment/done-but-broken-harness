@@ -14,7 +14,6 @@ from __future__ import annotations
 import re
 import subprocess
 import tempfile
-import threading
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -114,30 +113,38 @@ def run_eval(
         # When running offline (sealed policy), force uv into offline mode so a PREBAKED image uses
         # its warmed venv/cache instead of hitting PyPI. Harmless for non-uv tasks. No-op online.
         offline_env = ["-e", "UV_OFFLINE=1"] if network == "none" else []
-        # The timeout is enforced by `docker kill` on a NAMED container, NOT subprocess's timeout:
-        # subprocess's timeout can't stop `docker run` (it kills the client; the container keeps the
-        # stdout pipe open and the post-kill communicate() blocks forever — the diagnosed deadlock).
-        # `docker kill` authoritatively SIGKILLs every process in the container, closing the pipe so
-        # communicate() returns. A killed suite -> non-zero rc -> scored not-resolved (correct: a
-        # patch that hangs the tests is a failed fix).
+        # Robust container exec: redirect output to FILES, not pipes. An orphaned in-container process
+        # (OrbStack + x86 emulation can leave un-reapable orphans) keeps a stdout PIPE open and wedges
+        # subprocess.communicate() forever even after the container exits — and even `docker kill`
+        # then hits the same wedge. With files there is no pipe to block on, so subprocess's OWN
+        # timeout works cleanly (its post-kill communicate() returns instantly with no pipes). A
+        # timed-out/hung suite -> non-zero rc -> scored not-resolved (a patch that hangs the tests is a
+        # failed fix). A named container + a bounded `docker rm -f` force-stops any orphan afterward.
         cname = f"e2eval-{uuid.uuid4().hex[:12]}"
+        out_f, err_f = tdp / "stdout.log", tdp / "stderr.log"
         docker_cmd = [
             "docker", "run", "--rm", "--name", cname, "--network", network, "--platform", platform,
             *offline_env, "-v", f"{td}:/patches:ro",
             image or image_name(instance["instance_id"]), "bash", "-c", script,
         ]
-        killer = threading.Timer(
-            timeout, lambda: subprocess.run(["docker", "kill", cname], capture_output=True, text=True))
-        killer.start()
+        rc = -1
         try:
-            proc = subprocess.run(docker_cmd, capture_output=True, text=True)
+            with open(out_f, "w") as fo, open(err_f, "w") as fe:
+                rc = subprocess.run(docker_cmd, stdout=fo, stderr=fe, timeout=timeout).returncode
+        except subprocess.TimeoutExpired:
+            rc = -1  # hung suite was killed on timeout -> not resolved
         finally:
-            killer.cancel()
-            subprocess.run(["docker", "rm", "-f", cname], capture_output=True, text=True)
+            try:
+                subprocess.run(["docker", "rm", "-f", cname], stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, timeout=60)
+            except subprocess.TimeoutExpired:
+                pass  # orphan container un-killable (emulation) — leave it rather than wedge the run
+        stdout = out_f.read_text(errors="replace") if out_f.exists() else ""
+        stderr = err_f.read_text(errors="replace") if err_f.exists() else ""
     return EvalResult(
-        returncode=proc.returncode,
-        results=parse_pytest_results(proc.stdout),
-        stdout=proc.stdout,
-        stderr=proc.stderr,
+        returncode=rc,
+        results=parse_pytest_results(stdout),
+        stdout=stdout,
+        stderr=stderr,
         applied_gold=apply_gold and candidate_patch is None,
     )
