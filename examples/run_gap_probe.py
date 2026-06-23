@@ -46,7 +46,7 @@ def main() -> None:
     if backend not in BACKENDS:
         print(f"--backend must be one of {list(BACKENDS)}; got {backend!r}")
         return
-    out_path = f"e2-{backend}-gap-probe-20260616-001.json"
+    out_path = f"e2-{backend}-gap-probe-20260617-001.json"
     print(f"{backend} gap probe: {len(HARD_TASKS)} hard tasks x {n} runs = {len(HARD_TASKS) * n} rollouts "
           f"(concurrency={concurrency})")
     print("  single condition (vendor CLI as-is); scored by our hidden oracle; measures self-verification gap")
@@ -113,7 +113,7 @@ def main() -> None:
         finally:
             _reclaim(tid, image_name)
 
-    json.dump({"run_id": f"e2-{backend}-gap-probe-20260616-001", "classification": "calibration",
+    json.dump({"run_id": f"e2-{backend}-gap-probe-20260617-001", "classification": "calibration",
                "backend": backend, "note": "second-model gap probe; NOT the controlled ablation",
                "rows": rows}, open(out_path, "w"), indent=1)
     gapped = [r for r in rows if (r["gap_rate"] or 0) > 0]
