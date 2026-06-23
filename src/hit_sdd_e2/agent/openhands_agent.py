@@ -128,7 +128,7 @@ class OpenHandsAgent:
         from openhands.tools.preset.default import get_default_tools
 
         from hit_sdd_e2.agent.container_tools import register_run_tests_tool
-        from hit_sdd_e2.substrate.swebench_live import _parse_test_list
+        from hit_sdd_e2.substrate.swebench_live import parse_test_list
 
         workdir = tempfile.mkdtemp(prefix="e2-ws-")
         try:
@@ -146,7 +146,7 @@ class OpenHandsAgent:
             # host-safe tools: read/edit only (no host shell); treatment adds container-backed run_tests.
             tools = [t for t in get_default_tools(enable_browser=False) if t.name == "file_editor"]
             if arm == "treatment":
-                register_run_tests_tool(instance, image, _parse_test_list(instance["FAIL_TO_PASS"]))
+                register_run_tests_tool(instance, image, parse_test_list(instance["FAIL_TO_PASS"]))
                 tools.append(Tool(name=RUN_TESTS_TOOL_NAME))
             elif arm != "control":
                 raise ValueError(f"arm must be control|treatment, got {arm!r}")

@@ -20,6 +20,7 @@ from datetime import date, datetime
 
 # Path heuristics for classifying a changed file as a test file (Python-heavy substrate).
 _TEST_DIR_SEGMENTS = frozenset({"test", "tests", "testing", "_test", "__tests__"})
+_DIFF_GIT_PREFIX = "diff --git "
 
 
 def is_test_path(path: str) -> bool:
@@ -39,19 +40,20 @@ def changed_files(patch: str) -> list[str]:
     """Extract changed file paths from a unified diff (the `diff --git a/X b/Y` lines)."""
     files: list[str] = []
     for line in patch.splitlines():
-        if line.startswith("diff --git "):
-            # `diff --git a/<x> b/<y>` — take the b/ side (new path).
+        if line.startswith(_DIFF_GIT_PREFIX):
+            # `diff --git a/<x> b/<y>` — take the b/ side (new path). One header per file, so no dedup.
             parts = line.split(" b/", 1)
             if len(parts) == 2:
                 files.append(parts[1].strip())
         elif line.startswith("+++ b/"):
+            # `+++ b/<y>` repeats the same path as the `diff --git` header — dedup against it.
             cand = line[len("+++ b/"):].strip()
             if cand and cand != "/dev/null" and cand not in files:
                 files.append(cand)
     return files
 
 
-def _parse_test_list(value: object) -> list[str]:
+def parse_test_list(value: object) -> list[str]:
     """FAIL_TO_PASS / PASS_TO_PASS may be a JSON string or an already-parsed list."""
     if isinstance(value, list):
         return [str(v) for v in value]
@@ -106,7 +108,7 @@ def regression_risk_ok(instance: dict, screen: RegressionRiskScreen | None = Non
     patch = instance.get("patch") or ""
     if non_test_file_count(patch) < screen.min_non_test_files:
         return False
-    if len(_parse_test_list(instance.get("PASS_TO_PASS"))) < screen.min_pass_to_pass:
+    if len(parse_test_list(instance.get("PASS_TO_PASS"))) < screen.min_pass_to_pass:
         return False
     return True
 

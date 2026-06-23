@@ -31,7 +31,7 @@ from hit_sdd_e2.orchestrate.phase1_5_analysis import is_valid_record
 from hit_sdd_e2.runner.agent import Agent, AgentOutcome
 from hit_sdd_e2.runner.scoring import ScoreRecord, score_candidate
 from hit_sdd_e2.sanitize.snapshot import build_sanitized_image
-from hit_sdd_e2.substrate.swebench_live import _parse_test_list
+from hit_sdd_e2.substrate.swebench_live import parse_test_list
 
 
 @dataclass(frozen=True)
@@ -47,7 +47,7 @@ def _gold_fail_quarantine(instance: dict, image: str, timeout: int) -> frozenset
     """P2P tests that fail deterministically under the gold patch in THIS container (env-sensitive,
     not valid PASS_TO_PASS here). Computed once per task on the live image; excluded from scoring."""
     gold = run_eval(instance, apply_gold=True, image=image, timeout=timeout)
-    p2p = _parse_test_list(instance.get("PASS_TO_PASS"))
+    p2p = parse_test_list(instance.get("PASS_TO_PASS"))
     return frozenset(t for t in p2p if gold.outcome_for(t) in ("FAILED", "ERROR"))
 
 

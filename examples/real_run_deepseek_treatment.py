@@ -22,7 +22,7 @@ from openhands.tools.preset.default import get_default_tools  # noqa: E402
 
 from hit_sdd_e2.agent.container_tools import RUN_TESTS_TOOL_NAME, register_run_tests_tool  # noqa: E402
 from hit_sdd_e2.runner.scoring import score_candidate  # noqa: E402
-from hit_sdd_e2.substrate.swebench_live import _parse_test_list  # noqa: E402
+from hit_sdd_e2.substrate.swebench_live import parse_test_list  # noqa: E402
 
 INSTANCE_ID = "spulec__freezegun-582"
 SANITIZED_IMAGE = "e2-sanitized:freezegun-582"
@@ -41,7 +41,7 @@ def export_checkout(image: str, dest: str) -> None:
 def main() -> None:
     inst = next(x for x in load_dataset("SWE-bench-Live/SWE-bench-Live", split="test")
                 if x["instance_id"] == INSTANCE_ID)
-    f2p = _parse_test_list(inst["FAIL_TO_PASS"])
+    f2p = parse_test_list(inst["FAIL_TO_PASS"])
     run_tests_calls = {"n": 0}
 
     with tempfile.TemporaryDirectory() as workdir:

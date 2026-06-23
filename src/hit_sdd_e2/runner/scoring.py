@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 
 from hit_sdd_e2.oracle.swebench_eval import run_eval
 from hit_sdd_e2.provenance.hashing import hash_text
-from hit_sdd_e2.substrate.swebench_live import _parse_test_list
+from hit_sdd_e2.substrate.swebench_live import parse_test_list
 
 
 @dataclass(frozen=True)
@@ -69,8 +69,8 @@ def score_candidate(
     quarantined PLUS tests that fail deterministically under the gold patch in this container
     (env-sensitive, not valid PASS_TO_PASS here). Excluding them prevents false regressions.
     """
-    f2p = [t for t in _parse_test_list(instance.get("FAIL_TO_PASS")) if t not in quarantine]
-    p2p = [t for t in _parse_test_list(instance.get("PASS_TO_PASS")) if t not in quarantine]
+    f2p = [t for t in parse_test_list(instance.get("FAIL_TO_PASS")) if t not in quarantine]
+    p2p = [t for t in parse_test_list(instance.get("PASS_TO_PASS")) if t not in quarantine]
     res = run_eval(
         instance,
         apply_gold=False,
