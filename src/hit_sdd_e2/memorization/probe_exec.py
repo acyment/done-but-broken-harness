@@ -134,8 +134,15 @@ _CONTINUE_PROMPT = (
     "explanation, no fences:\n\n{prefix}"
 )
 
+# code_continuation_probe tunables (boundaries pinned by tests/test_continuation_probe_boundaries.py).
+_MIN_REGION_LINES = 8     # smallest changed-region size (non-blank lines) worth probing
+_PREFIX_FRACTION = 0.45   # fraction of the region shown as the prefix; the rest is the held-out suffix
+_MIN_PREFIX_LINES = 3     # floor on prefix lines (defensive; unreachable while _MIN_REGION_LINES >= 7)
+_MIN_SUFFIX_TOKENS = 15   # held-out whitespace tokens needed for a meaningful 5-gram overlap
 
-def code_continuation_probe(instance: dict, llm_complete, prefix_frac: float = 0.45) -> dict | None:
+
+def code_continuation_probe(instance: dict, llm_complete,
+                            prefix_frac: float = _PREFIX_FRACTION) -> dict | None:
     """Verbatim-continuation membership-inference probe (no logprobs needed).
 
     Feed the model the exact prefix of a changed source region and ask it to continue. A model that
@@ -145,14 +152,14 @@ def code_continuation_probe(instance: dict, llm_complete, prefix_frac: float = 0
     caller calibrates the overlap against a mismatched-suffix negative control (idiom/predictability
     floor). Returns None if the target is too short to split.
     """
-    target = extract_repro_target(instance["patch"], min_lines=8)
+    target = extract_repro_target(instance["patch"], min_lines=_MIN_REGION_LINES)
     if target is None:
         return None
     lines = target["actual_code"].splitlines()
-    cut = max(3, int(round(len(lines) * prefix_frac)))
+    cut = max(_MIN_PREFIX_LINES, int(round(len(lines) * prefix_frac)))
     prefix = "\n".join(lines[:cut]).strip()
     suffix = "\n".join(lines[cut:]).strip()
-    if len(suffix.split()) < 15:  # need enough held-out tokens for a meaningful 5-gram overlap
+    if len(suffix.split()) < _MIN_SUFFIX_TOKENS:  # enough held-out tokens for a 5-gram overlap
         return None
     out = _strip_fences(
         llm_complete(_CONTINUE_PROMPT.format(repo=instance["repo"], file=target["file"], prefix=prefix))
