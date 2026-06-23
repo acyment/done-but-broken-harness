@@ -54,6 +54,29 @@ def build_llm(model_route: dict, *, api_key: str) -> "LLM":
     )
 
 
+def _collect_usage(llm) -> dict | None:
+    """Pull accumulated token/cost metrics off an OpenHands LLM after a conversation.
+
+    Returns prompt/completion/cache_read/cache_write/reasoning token totals + accumulated_cost +
+    call count. `cache_read_tokens` is litellm's mapping of the provider's cached-prompt tokens, so
+    `cache_read / prompt` is the realised prompt-cache hit ratio. `accumulated_cost` is litellm's
+    own estimate and is only meaningful when the model has registered pricing (a custom
+    OpenAI-compatible endpoint usually does not) — treat tokens as authoritative, cost as a hint.
+    """
+    try:
+        m = llm.metrics
+        tu = getattr(m, "accumulated_token_usage", None)
+        usage = {"accumulated_cost": getattr(m, "accumulated_cost", None),
+                 "n_calls": len(getattr(m, "costs", []) or []) or None}
+        if tu is not None:
+            for f in ("prompt_tokens", "completion_tokens", "cache_read_tokens",
+                      "cache_write_tokens", "reasoning_tokens"):
+                usage[f] = getattr(tu, f, None)
+        return usage
+    except Exception:  # noqa: BLE001 — metrics are diagnostic; never fail a rollout over them
+        return None
+
+
 def build_tools(arm: str) -> list["Tool"]:
     """Default coding tools for both arms; `treatment` additionally gets the `run_tests` tool spec."""
     from openhands.sdk import Tool
@@ -144,7 +167,8 @@ class OpenHandsAgent:
             declared_done = conv.state.execution_status == ConversationExecutionStatus.FINISHED
             patch = subprocess.run(["git", "-C", workdir, "diff"], capture_output=True, text=True).stdout
             return AgentOutcome(
-                patch=patch, declared_done=declared_done, self_verification_passed=declared_done
+                patch=patch, declared_done=declared_done, self_verification_passed=declared_done,
+                usage=_collect_usage(llm),
             )
         finally:
             shutil.rmtree(workdir, ignore_errors=True)

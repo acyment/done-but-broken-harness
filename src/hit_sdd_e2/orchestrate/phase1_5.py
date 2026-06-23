@@ -159,7 +159,13 @@ def run_phase1_5(
             ok_scored = []
             for (arm, r), out, sr in zip(items, outcomes, scored):
                 base = {"instance_id": iid, "arm": arm, "run": r, "run_id": run_id,
-                        "model_route": model_route, "n_quarantined": len(quarantine)}
+                        "model_route": model_route, "n_quarantined": len(quarantine),
+                        "usage": out.usage,
+                        # Persist the full patch so the run is PATCH-REPLAY-VALID: the stored diff can
+                        # be re-scored in a fresh container to reproduce the recorded outcomes (the
+                        # agent is nondeterministic, so the patch — not a re-run — is the replay unit).
+                        # "" for errored/no-change rollouts. patch_hash (in the scored record) hashes it.
+                        "patch": out.patch}
                 if out.error or isinstance(sr, Exception) or sr is None:
                     records.append({**base, "error": out.error or str(sr)[:300],
                                     "self_verification_gap": None})

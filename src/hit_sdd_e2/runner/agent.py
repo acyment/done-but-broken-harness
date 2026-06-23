@@ -22,6 +22,8 @@ class AgentOutcome:
     declared_done: bool
     self_verification_passed: bool  # the agent's OWN tests passed / it believed itself correct
     error: str | None = None  # set if the rollout failed (LLM/tool error); excluded from analysis
+    usage: dict | None = None  # per-rollout LLM token/cost metrics (prompt/completion/cache_read/
+    #                            cache_write/reasoning tokens, accumulated_cost, n_calls); None if unavailable
 
 
 class Agent(Protocol):
