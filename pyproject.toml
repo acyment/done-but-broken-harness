@@ -3,6 +3,7 @@ name = "hit-sdd-bench-e2"
 version = "0.0.0"
 description = "E2 brownfield acceptance-feedback ablation harness (Python/Docker). Code only; the scientific record lives in hit-sdd-bench."
 requires-python = ">=3.12"
+license = {text = "MIT"}
 dependencies = []
 
 [project.optional-dependencies]

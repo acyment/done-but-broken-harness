@@ -37,3 +37,10 @@ uv run pytest
 Phase 1 is an A/B **feasibility + contamination gate** (what n≈10 can decide) that also
 *measures* base rates to power a later Phase 1.5. It does **not** gate go/no-go on a
 rare-event regression effect — that design flaw was caught in critique and removed.
+
+## License
+
+© 2026 Alan Cyment. Source code — **MIT** ([`LICENSE`](LICENSE)); README/docs — **CC BY 4.0**
+([`LICENSE-docs`](LICENSE-docs)). Third-party material (SWE-bench Live substrate, evaluation images
+and the repos they contain, and run-artifacts embedding upstream code/model outputs) keeps its
+upstream license — see [`NOTICE`](NOTICE). The scientific record lives in the `hit-sdd-bench` repo.
