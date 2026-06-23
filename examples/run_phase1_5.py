@@ -1,15 +1,22 @@
 """E2 Phase-1.5 — the powered causal read (control vs treatment), bounded-parallel.
 
-GATED: this is the only operator-authorized, provider-spending path. It runs the OpenHands+DeepSeek
-agent 13 tasks x 2 arms x N runs. It REFUSES to run unless BOTH are set:
-    E2_AUTHORIZE_PHASE15=1   and   DEEPSEEK_API_KEY=...
+GATED: this is the only operator-authorized, provider-spending path. It runs the OpenHands agent on
+13 tasks x 2 arms x N runs against the model selected by E2_MODEL (default `deepseek`). It REFUSES to
+run unless BOTH are set:
+    E2_AUTHORIZE_PHASE15=1   and   the selected route's API key (e.g. DEEPSEEK_API_KEY / DASHSCOPE_API_KEY)
 Without them it prints the dry-run plan (task list, n, concurrency, rough cost/time) and exits.
+
+Model selection (frozen per-route below; pick one with E2_MODEL):
+    E2_MODEL=deepseek   -> deepseek-v4-pro  (DEEPSEEK_API_KEY)        [original sealed pilot]
+    E2_MODEL=qwen       -> qwen3.7-max       (DASHSCOPE_API_KEY)       [second-model replication, Addendum C]
+A route may also be overridden ad hoc via E2_LLM_MODEL / E2_LLM_BASE_URL / E2_LLM_API_KEY_ENV / E2_RUN_ID.
 
 Bounded parallelism (see orchestrate/phase1_5): task-sequential (one image live at a time — disk
 safety), rollout-parallel (agent_concurrency), oracle scoring at low concurrency (determinism).
 
 Usage (dry plan):   uv run --extra data python examples/run_phase1_5.py
-Usage (authorized): E2_AUTHORIZE_PHASE15=1 DEEPSEEK_API_KEY=... uv run --extra agent --extra data \
+Usage (authorized): E2_AUTHORIZE_PHASE15=1 E2_MODEL=qwen DASHSCOPE_API_KEY=... \
+                        uv run --extra agent --extra data \
                         python examples/run_phase1_5.py [--n 10] [--agent-cc 4] [--score-cc 1]
 """
 
@@ -38,9 +45,48 @@ CERTIFIED = [
 CERT_FLAKY = {
     "casbin__pycasbin-392": {"tests/test_fast_enforcer.py::TestFastEnforcer::test_performance"},
 }
-MODEL_ROUTE = {"provider": "deepseek", "model": "deepseek-v4-pro",
-               "base_url": "https://api.deepseek.com/v1", "litellm_model": "openai/deepseek-v4-pro"}
-RUN_ID = "e2-phase1-5-causal-pilot-deepseek-v4-pro"
+# Frozen per-model routes. Each is an independent compatibility boundary (never pooled across models).
+# `model` is the litellm id passed to the OpenHands LLM; `base_url` is the OpenAI-compatible endpoint.
+ROUTES = {
+    "deepseek": {  # original sealed pilot (Addendum B); DO NOT change — keeps replay-validity.
+        "provider": "deepseek", "model": "deepseek-v4-pro",
+        "base_url": "https://api.deepseek.com/v1", "litellm_model": "openai/deepseek-v4-pro",
+        "api_key_env": "DEEPSEEK_API_KEY",
+        "run_id": "e2-phase1-5-causal-pilot-deepseek-v4-pro",
+    },
+    "qwen": {  # second-model replication (Alibaba lineage) — Addendum C. OpenAI-compatible via litellm.
+        "provider": "alibaba-qwen", "model": "openai/qwen3.7-max",
+        # base_url resolves from the operator's frozen DashScope endpoint (MODEL_LOOP_ENDPOINT in .env);
+        # falls back to the shared international compatible-mode endpoint. Frozen value recorded in Addendum C.
+        "base_url": (os.environ.get("E2_LLM_BASE_URL")
+                     or (os.environ.get("MODEL_LOOP_ENDPOINT", "").rsplit("/chat/completions", 1)[0] or None)
+                     or "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
+        "litellm_model": "openai/qwen3.7-max",
+        "api_key_env": "DASHSCOPE_API_KEY",
+        "run_id": "e2-phase1-5-causal-pilot-qwen3.7-max",
+        # qwen3.7-max is a REASONING model: reasoning tokens share the output budget with the actual
+        # tool-call/message. The 4096 default (fine for the DeepSeek pilot) can truncate a turn mid
+        # tool-call -> structural failure, not a fair test. Headroom applies to BOTH arms equally, so
+        # the within-model control-vs-treatment contrast stays fair. Override with E2_LLM_MAX_OUT.
+        "max_output_tokens": int(os.environ.get("E2_LLM_MAX_OUT", "16000")),
+    },
+}
+
+
+def _resolve_route() -> dict:
+    sel = os.environ.get("E2_MODEL", "deepseek")
+    if sel not in ROUTES:
+        raise SystemExit(f"E2_MODEL must be one of {sorted(ROUTES)} (got {sel!r})")
+    r = dict(ROUTES[sel])
+    # ad-hoc overrides (kept for ergonomics; the frozen route is the default)
+    r["model"] = os.environ.get("E2_LLM_MODEL", r["model"])
+    r["api_key_env"] = os.environ.get("E2_LLM_API_KEY_ENV", r["api_key_env"])
+    r["run_id"] = os.environ.get("E2_RUN_ID", r["run_id"])
+    return r
+
+
+MODEL_ROUTE = _resolve_route()
+RUN_ID = MODEL_ROUTE["run_id"]
 
 
 def _arg(flag, default):
@@ -54,16 +100,20 @@ def main() -> None:
     limit = _arg("--limit", len(CERTIFIED))  # smoke a few tasks first before the full 13
     only = _arg("--tasks", "")  # comma-sep instance_ids to run exactly these (else CERTIFIED[:limit])
     task_ids = [t for t in only.split(",") if t in CERTIFIED] if only else CERTIFIED[:limit]
-    authorized = os.environ.get("E2_AUTHORIZE_PHASE15") == "1" and os.environ.get("DEEPSEEK_API_KEY")
+    api_key_env = MODEL_ROUTE["api_key_env"]
+    authorized = os.environ.get("E2_AUTHORIZE_PHASE15") == "1" and os.environ.get(api_key_env)
 
     rollouts = len(task_ids) * 2 * n
-    print(f"Phase-1.5 plan: {len(task_ids)} tasks x 2 arms x {n} runs = {rollouts} rollouts")
+    print(f"Phase-1.5 plan: model={MODEL_ROUTE['model']} (route '{os.environ.get('E2_MODEL','deepseek')}'), "
+          f"run_id={RUN_ID}")
+    print(f"  base_url={MODEL_ROUTE['base_url']}  api_key_env={api_key_env}")
+    print(f"  {len(task_ids)} tasks x 2 arms x {n} runs = {rollouts} rollouts")
     print(f"  bounded-parallel: agent_concurrency={agent_cc}, score_concurrency={score_cc}")
     print(f"  control = file_editor only; treatment = + run_tests; primary = self-verification gap")
     print(f"  rough wall: ~{rollouts * 12 / 60 / max(agent_cc,1):.0f}h agent + scoring; "
           f"classification = causal_pilot")
     if not authorized:
-        print("\nNOT AUTHORIZED — set E2_AUTHORIZE_PHASE15=1 and DEEPSEEK_API_KEY to run. "
+        print(f"\nNOT AUTHORIZED — set E2_AUTHORIZE_PHASE15=1 and {api_key_env} to run. "
               "Dry plan only; nothing executed.")
         return
 
@@ -86,7 +136,7 @@ def main() -> None:
     tasks = [Phase15Task(by_id[tid], quarantine=frozenset(CERT_FLAKY.get(tid, set())),
                          warm_cmd=warm_of(by_id[tid])) for tid in task_ids]
 
-    agent = OpenHandsAgent(model_route=MODEL_ROUTE, api_key=os.environ["DEEPSEEK_API_KEY"])
+    agent = OpenHandsAgent(model_route=MODEL_ROUTE, api_key=os.environ[api_key_env])
     # scoring timeout: a legit suite-run on these tasks is seconds-to-minutes; >10min means a broken
     # candidate patch hung the suite (the diagnosed "hang"). Fail fast -> excluded error, run continues.
     score_timeout = _arg("--score-timeout", 600)
