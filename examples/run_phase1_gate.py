@@ -13,6 +13,7 @@ os.environ.setdefault("OPENHANDS_SUPPRESS_BANNER", "1")
 import litellm  # noqa: E402
 from datasets import load_dataset  # noqa: E402
 
+from hit_sdd_e2._cli.routes import litellm_route  # noqa: E402
 from hit_sdd_e2.determinism.certify import certify_task  # noqa: E402
 from hit_sdd_e2.memorization.probe_exec import file_path_id_probe  # noqa: E402
 from hit_sdd_e2.oracle.swebench_eval import image_name  # noqa: E402
@@ -30,9 +31,9 @@ RUN_ID = "e2-phase1-gate-deepseek-v4-pro-20260614-001"
 
 
 def deepseek_complete(prompt: str) -> str:
+    route = litellm_route("deepseek")
     r = litellm.completion(
-        model="openai/deepseek-v4-pro", base_url="https://api.deepseek.com/v1",
-        api_key=os.environ["DEEPSEEK_API_KEY"],
+        model=route["model"], base_url=route["base_url"], api_key=os.environ[route["api_key_env"]],
         messages=[{"role": "user", "content": prompt}], max_tokens=3000, temperature=0,
     )
     return r.choices[0].message.content or ""

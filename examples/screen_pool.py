@@ -35,6 +35,7 @@ from hit_sdd_e2.memorization.probe_exec import (  # noqa: E402
     code_continuation_probe,
     file_path_id_probe,
 )
+from hit_sdd_e2._cli.routes import litellm_route  # noqa: E402
 
 POOL = os.environ.get(
     "E2_SCREEN_POOL",
@@ -62,9 +63,9 @@ _ZEN_SUFFIX = (
 
 
 def deepseek_complete(prompt: str) -> str:
+    route = litellm_route("deepseek")
     r = litellm.completion(
-        model="openai/deepseek-v4-pro", base_url="https://api.deepseek.com/v1",
-        api_key=os.environ["DEEPSEEK_API_KEY"],
+        model=route["model"], base_url=route["base_url"], api_key=os.environ[route["api_key_env"]],
         messages=[{"role": "user", "content": prompt}], max_tokens=8000, temperature=0,
     )
     return r.choices[0].message.content or ""

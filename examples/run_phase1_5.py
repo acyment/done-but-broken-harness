@@ -45,47 +45,10 @@ CERTIFIED = [
 CERT_FLAKY = {
     "casbin__pycasbin-392": {"tests/test_fast_enforcer.py::TestFastEnforcer::test_performance"},
 }
-# Frozen per-model routes. Each is an independent compatibility boundary (never pooled across models).
-# `model` is the litellm id passed to the OpenHands LLM; `base_url` is the OpenAI-compatible endpoint.
-ROUTES = {
-    "deepseek": {  # original sealed pilot (Addendum B); DO NOT change — keeps replay-validity.
-        "provider": "deepseek", "model": "deepseek-v4-pro",
-        "base_url": "https://api.deepseek.com/v1", "litellm_model": "openai/deepseek-v4-pro",
-        "api_key_env": "DEEPSEEK_API_KEY",
-        "run_id": "e2-phase1-5-causal-pilot-deepseek-v4-pro",
-    },
-    "qwen": {  # second-model replication (Alibaba lineage) — Addendum C. OpenAI-compatible via litellm.
-        "provider": "alibaba-qwen", "model": "openai/qwen3.7-max",
-        # base_url resolves from the operator's frozen DashScope endpoint (MODEL_LOOP_ENDPOINT in .env);
-        # falls back to the shared international compatible-mode endpoint. Frozen value recorded in Addendum C.
-        "base_url": (os.environ.get("E2_LLM_BASE_URL")
-                     or (os.environ.get("MODEL_LOOP_ENDPOINT", "").rsplit("/chat/completions", 1)[0] or None)
-                     or "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
-        "litellm_model": "openai/qwen3.7-max",
-        "api_key_env": "DASHSCOPE_API_KEY",
-        "run_id": "e2-phase1-5-causal-pilot-qwen3.7-max",
-        # qwen3.7-max is a REASONING model: reasoning tokens share the output budget with the actual
-        # tool-call/message. The 4096 default (fine for the DeepSeek pilot) can truncate a turn mid
-        # tool-call -> structural failure, not a fair test. Headroom applies to BOTH arms equally, so
-        # the within-model control-vs-treatment contrast stays fair. Override with E2_LLM_MAX_OUT.
-        "max_output_tokens": int(os.environ.get("E2_LLM_MAX_OUT", "16000")),
-    },
-}
+# Frozen per-model routes live in the package (single source of truth, replay-validity).
+from hit_sdd_e2._cli.routes import resolve_route
 
-
-def _resolve_route() -> dict:
-    sel = os.environ.get("E2_MODEL", "deepseek")
-    if sel not in ROUTES:
-        raise SystemExit(f"E2_MODEL must be one of {sorted(ROUTES)} (got {sel!r})")
-    r = dict(ROUTES[sel])
-    # ad-hoc overrides (kept for ergonomics; the frozen route is the default)
-    r["model"] = os.environ.get("E2_LLM_MODEL", r["model"])
-    r["api_key_env"] = os.environ.get("E2_LLM_API_KEY_ENV", r["api_key_env"])
-    r["run_id"] = os.environ.get("E2_RUN_ID", r["run_id"])
-    return r
-
-
-MODEL_ROUTE = _resolve_route()
+MODEL_ROUTE = resolve_route()  # selector from E2_MODEL (default deepseek); ad-hoc env overrides apply
 RUN_ID = MODEL_ROUTE["run_id"]
 
 
