@@ -14,6 +14,11 @@ import random
 from dataclasses import dataclass
 from math import comb
 
+# v1.0 = the sealed e2-phase1-5-plan-v1 behavior. v1.1 EXCLUDES empty-arm tasks (an arm with zero
+# valid runs) from the family — previously such a task raised ZeroDivisionError and was excluded by
+# hand (the black-4684 treatment-n=0 case). v1.1 is byte-identical to v1.0 on all balanced-arm data.
+ANALYSIS_VERSION = "1.1"
+
 
 @dataclass(frozen=True)
 class TaskResult:
@@ -25,6 +30,14 @@ class TaskResult:
     meets_mcid: bool
 
 
+def is_valid_record(rec: dict) -> bool:
+    """FROZEN inclusion predicate: a rollout record counts toward the measurement iff it has an `arm`,
+    no truthy `error`, and a non-None `self_verification_gap`. Single source of truth for `summarize`
+    and `family_wise`; mirrored (with a drift test) in the stdlib-only `examples/emit_run_summary.py`.
+    """
+    return "arm" in rec and not rec.get("error") and rec.get("self_verification_gap") is not None
+
+
 def _rate(xs: list[int]) -> float:
     return sum(xs) / len(xs) if xs else 0.0
 
@@ -34,7 +47,11 @@ def permutation_p(control: list[int], treatment: list[int], *, n_perm: int = 200
     """One-sided permutation p-value for `control_rate - treatment_rate > 0` (treatment reduces gap).
 
     Exact enumeration when the label-permutation count is small; else seeded Monte Carlo.
+    An empty arm has no valid contrast, so we return 1.0 (no evidence treatment reduces the gap)
+    rather than dividing by zero.
     """
+    if not control or not treatment:
+        return 1.0
     pool = control + treatment
     n_c = len(control)
     observed = _rate(control) - _rate(treatment)
@@ -44,11 +61,10 @@ def permutation_p(control: list[int], treatment: list[int], *, n_perm: int = 200
     exact = comb(n, n_c)
     if exact <= n_perm:
         ge = cnt = 0
-        # iterate over all ways to choose n_c control slots is heavy; instead use the hypergeometric
-        # support: control-positive count k in [max(0,total-(n-n_c)), min(total,n_c)].
-        from math import comb as C
+        # Enumerate the hypergeometric support: control-positive count k in
+        # [max(0, total-(n-n_c)), min(total, n_c)], weighting each k by its label-assignment count.
         for k in range(max(0, total - (n - n_c)), min(total, n_c) + 1):
-            ways = C(n_c, k) * C(n - n_c, total - k)
+            ways = comb(n_c, k) * comb(n - n_c, total - k)
             stat = k / n_c - (total - k) / (n - n_c)
             cnt += ways
             if stat >= observed - 1e-12:
@@ -90,19 +106,26 @@ def family_wise(records: list[dict], *, alpha: float = 0.05, mcid: float = 0.20,
     """
     by_task: dict[str, dict[str, list[int]]] = {}
     for rec in records:
-        if "arm" not in rec or rec.get("error") or rec.get("self_verification_gap") is None:
-            continue  # skip errored rollouts
+        if not is_valid_record(rec):
+            continue  # skip errored / incomplete rollouts
         t = by_task.setdefault(rec["instance_id"], {"control": [], "treatment": []})
         t[rec["arm"]].append(int(rec["self_verification_gap"]))
 
+    # v1.1: a task with an empty arm (zero valid runs on one side) has no contrast — exclude it from
+    # the family rather than crash. Formalizes the manual black-4684 (treatment n=0) exclusion.
+    excluded_empty_arm = sorted(iid for iid, d in by_task.items()
+                                if not d["control"] or not d["treatment"])
+    scored = {iid: d for iid, d in by_task.items() if d["control"] and d["treatment"]}
     tasks = [analyze_task(iid, d["control"], d["treatment"], mcid=mcid, seed=seed)
-             for iid, d in sorted(by_task.items())]
+             for iid, d in sorted(scored.items())]
     hits = [t for t in tasks if t.p_value < alpha and t.meets_mcid]
     k, n = len(hits), len(tasks)
     fw_p = _binom_tail(k, n, alpha) if n else 1.0
     win = n > 0 and fw_p <= budget
     return {
+        "analysis_version": ANALYSIS_VERSION,
         "n_tasks": n, "n_hits": k, "hit_ids": [t.instance_id for t in hits],
+        "excluded_empty_arm": excluded_empty_arm,
         "family_wise_null_p": fw_p, "alpha": alpha, "mcid": mcid, "budget": budget,
         "verdict": ("candidate_frontier_positive" if win else "inconclusive_single_model"),
         "per_task": [{"instance_id": t.instance_id, "effect": round(t.effect, 3),

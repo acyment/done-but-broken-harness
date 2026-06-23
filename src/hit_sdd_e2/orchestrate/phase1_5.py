@@ -27,6 +27,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 from hit_sdd_e2.oracle.swebench_eval import image_name, run_eval
+from hit_sdd_e2.orchestrate.phase1_5_analysis import is_valid_record
 from hit_sdd_e2.runner.agent import Agent, AgentOutcome
 from hit_sdd_e2.runner.scoring import ScoreRecord, score_candidate
 from hit_sdd_e2.sanitize.snapshot import build_sanitized_image
@@ -193,8 +194,8 @@ def summarize(records: list[dict], runs_per_arm: int) -> dict:
     """Per-task per-arm self-verification-gap and resolve rates (the inputs to the permutation test)."""
     by_task: dict[str, dict] = {}
     for rec in records:
-        if "arm" not in rec or rec.get("error") or rec.get("self_verification_gap") is None:
-            continue  # skip errored rollouts — not real outcomes
+        if not is_valid_record(rec):
+            continue  # skip errored / incomplete rollouts — not real outcomes
         t = by_task.setdefault(rec["instance_id"], {a: {"gap": 0, "n": 0, "resolved": 0}
                                                     for a in ("control", "treatment")})
         a = t[rec["arm"]]

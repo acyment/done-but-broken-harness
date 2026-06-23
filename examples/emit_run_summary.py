@@ -18,14 +18,19 @@ import json
 import sys
 
 
+def _is_valid(r):
+    """Mirror of hit_sdd_e2.orchestrate.phase1_5_analysis.is_valid_record — kept inline so this
+    evidence emitter stays stdlib-only (runnable with plain `python`, no harness install). A drift
+    test (tests/test_valid_records.py) asserts the two agree."""
+    return "arm" in r and not r.get("error") and r.get("self_verification_gap") is not None
+
+
 def _rates(records, taskset):
     """Pooled + per-task control/treatment gap & resolve rates over valid records in `taskset`."""
     per = {}
     pooled = {a: {"gap": 0, "resolve": 0, "n": 0} for a in ("control", "treatment")}
     for r in records:
-        if "arm" not in r or r.get("error") or r.get("self_verification_gap") is None:
-            continue
-        if r["instance_id"] not in taskset:
+        if not _is_valid(r) or r["instance_id"] not in taskset:
             continue
         t = per.setdefault(r["instance_id"], {a: {"gap": 0, "resolve": 0, "n": 0}
                                               for a in ("control", "treatment")})
