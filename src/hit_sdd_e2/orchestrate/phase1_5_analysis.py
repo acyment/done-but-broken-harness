@@ -42,6 +42,12 @@ def _rate(xs: list[int]) -> float:
     return sum(xs) / len(xs) if xs else 0.0
 
 
+def _hypergeometric_support(total: int, n: int, n_c: int) -> range:
+    """Possible counts k of positives landing in the control group when drawing n_c of n items that
+    hold `total` positives (the permutation statistic depends only on k)."""
+    return range(max(0, total - (n - n_c)), min(total, n_c) + 1)
+
+
 def permutation_p(control: list[int], treatment: list[int], *, n_perm: int = 20000,
                   seed: int = 0) -> float:
     """One-sided permutation p-value for `control_rate - treatment_rate > 0` (treatment reduces gap).
@@ -61,9 +67,8 @@ def permutation_p(control: list[int], treatment: list[int], *, n_perm: int = 200
     exact = comb(n, n_c)
     if exact <= n_perm:
         ge = cnt = 0
-        # Enumerate the hypergeometric support: control-positive count k in
-        # [max(0, total-(n-n_c)), min(total, n_c)], weighting each k by its label-assignment count.
-        for k in range(max(0, total - (n - n_c)), min(total, n_c) + 1):
+        # Enumerate the support, weighting each k by its number of label assignments.
+        for k in _hypergeometric_support(total, n, n_c):
             ways = comb(n_c, k) * comb(n - n_c, total - k)
             stat = k / n_c - (total - k) / (n - n_c)
             cnt += ways

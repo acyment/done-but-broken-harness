@@ -57,7 +57,7 @@ def render_run_card(records: list[dict], *, title: str, gate: dict | None = None
     if records:
         cls = sorted({r["run_classification"] for r in records})
         lines += [
-            f"| Field | Value |", "| --- | --- |",
+            "| Field | Value |", "| --- | --- |",
             f"| Substrate | {records[0]['substrate']} |",
             f"| Runs | {len(records)} |",
             f"| Classification | {', '.join(cls)} |",

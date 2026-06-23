@@ -148,7 +148,7 @@ def code_continuation_probe(instance: dict, llm_complete, prefix_frac: float = 0
     target = extract_repro_target(instance["patch"], min_lines=8)
     if target is None:
         return None
-    lines = [ln for ln in target["actual_code"].splitlines()]
+    lines = target["actual_code"].splitlines()
     cut = max(3, int(round(len(lines) * prefix_frac)))
     prefix = "\n".join(lines[:cut]).strip()
     suffix = "\n".join(lines[cut:]).strip()
