@@ -8,30 +8,15 @@ Usage: uv run --extra data python examples/flake_smoke_prebaked.py [id ...]
 
 import json
 import os
-import shutil
-import subprocess
 import sys
 import time
 
-from datasets import load_dataset
-
-MIN_FREE_GB = float(os.environ.get("E2_MIN_FREE_GB", "8"))
-
-
-def _free_gb() -> float:
-    """Free GiB on the volume holding the OrbStack/Docker data (the user's home volume)."""
-    return shutil.disk_usage(os.path.expanduser("~")).free / 2**30
-
+from hit_sdd_e2._cli.dataset import load_by_id, warm_cmd
+from hit_sdd_e2._cli.dockerutil import free_gb, reclaim
 from hit_sdd_e2.oracle.swebench_eval import image_name, run_eval
 from hit_sdd_e2.sanitize.snapshot import build_sanitized_image
 
-
-def _reclaim(tid: str) -> None:
-    """Remove this task's eval + prebaked images so a long smoke can't fill the disk.
-    Each SWE-bench image is multi-GB; without this, N pulls exhaust the host volume."""
-    for img in (f"e2-prebaked:{tid}", image_name(tid)):
-        subprocess.run(["docker", "rmi", "-f", img], capture_output=True, text=True)
-
+MIN_FREE_GB = float(os.environ.get("E2_MIN_FREE_GB", "8"))
 OUT = os.environ.get("E2_SMOKE_OUT", "e2-phase1-5-flake-smoke-prebaked-20260614-001.json")
 TIMEOUT = int(os.environ.get("E2_SMOKE_TIMEOUT", "1500"))  # per warm and per gold run; fail fast on hangs
 # previously non-clean tasks from the offline smoke (infeasible-network + dirty)
@@ -45,19 +30,17 @@ DEFAULT = [
 
 def main() -> None:
     ids = sys.argv[1:] or DEFAULT
-    ds = load_dataset("SWE-bench-Live/SWE-bench-Live", split="test")
-    by_id = {x["instance_id"]: x for x in ds if x["instance_id"] in set(ids)}
+    by_id = load_by_id(ids)
 
     results = []
     for tid in ids:
-        free = _free_gb()
+        free = free_gb()
         if free < MIN_FREE_GB:
             print(f"ABORT: only {free:.1f} GiB free (< {MIN_FREE_GB}); stopping before {tid} "
                   f"to protect the host disk.", flush=True)
             break
         inst = by_id[tid]
-        tc = inst["test_cmds"]
-        warm = tc if isinstance(tc, str) else " && ".join(tc)
+        warm = warm_cmd(inst)
         t0 = time.monotonic()
         rec = {"instance_id": tid}
         try:
@@ -75,7 +58,7 @@ def main() -> None:
             rec.update({"ok": False, "error": str(e)[:160],
                         "wall_s": round(time.monotonic() - t0, 1)})
         finally:
-            _reclaim(tid)  # always free this task's images before the next pull
+            reclaim(f"e2-prebaked:{tid}", image_name(tid))  # free this task's images before next pull
         results.append(rec)
         verdict = ("CLEAN" if rec.get("ok") and rec.get("failed") == 0
                    else "near" if rec.get("ok") and rec.get("failed", 99) <= 2

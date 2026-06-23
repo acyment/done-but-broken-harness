@@ -14,11 +14,12 @@ Usage: uv run --extra data python examples/run_gap_probe.py [--backend codex|cla
 """
 
 import json
-import os
 import shutil
-import subprocess
-import sys
 from concurrent.futures import ThreadPoolExecutor
+
+from hit_sdd_e2._cli.args import arg, flag_present
+from hit_sdd_e2._cli.dataset import load_by_id, warm_cmd
+from hit_sdd_e2._cli.dockerutil import free_gb, reclaim
 
 HARD_TASKS = {  # task -> DeepSeek CONTROL gap, for comparison
     "pypa__twine-1249": 1.00,
@@ -29,20 +30,11 @@ BACKENDS = {"codex": "codex", "claude": "claude"}  # backend -> CLI binary to re
 MIN_FREE_GB = 10.0
 
 
-def _free_gb() -> float:
-    return shutil.disk_usage(os.path.expanduser("~")).free / 2**30
-
-
-def _reclaim(iid, image_name):
-    for img in (f"e2-prebaked:{iid}", image_name(iid)):
-        subprocess.run(["docker", "rmi", "-f", img], capture_output=True, text=True)
-
-
 def main() -> None:
-    backend = sys.argv[sys.argv.index("--backend") + 1] if "--backend" in sys.argv else "codex"
-    run = "--run" in sys.argv
-    n = int(sys.argv[sys.argv.index("--n") + 1]) if "--n" in sys.argv else 5
-    concurrency = int(sys.argv[sys.argv.index("--concurrency") + 1]) if "--concurrency" in sys.argv else 2
+    backend = arg("--backend", "codex")
+    run = flag_present("--run")
+    n = arg("--n", 5)
+    concurrency = arg("--concurrency", 2)
     if backend not in BACKENDS:
         print(f"--backend must be one of {list(BACKENDS)}; got {backend!r}")
         return
@@ -60,8 +52,6 @@ def main() -> None:
         print(f"\nDRY RUN — pass --run to execute against your {backend} plan (mind rate limits). Nothing run.")
         return
 
-    from datasets import load_dataset
-
     from hit_sdd_e2.agent.codex_agent import ClaudeCodeAgent, CodexAgent
     from hit_sdd_e2.oracle.swebench_eval import image_name
     from hit_sdd_e2.orchestrate.phase1_5 import _gold_fail_quarantine
@@ -69,18 +59,15 @@ def main() -> None:
     from hit_sdd_e2.sanitize.snapshot import build_sanitized_image
 
     agent = CodexAgent() if backend == "codex" else ClaudeCodeAgent()
-    ds = load_dataset("SWE-bench-Live/SWE-bench-Live", split="test")
-    by_id = {x["instance_id"]: x for x in ds if x["instance_id"] in set(HARD_TASKS)}
+    by_id = load_by_id(HARD_TASKS)
     rows = []
     for tid, ds_ctrl_gap in HARD_TASKS.items():
-        if _free_gb() < MIN_FREE_GB:
-            print(f"ABORT: low disk ({_free_gb():.1f} GiB) before {tid}")
+        if free_gb() < MIN_FREE_GB:
+            print(f"ABORT: low disk ({free_gb():.1f} GiB) before {tid}")
             break
         inst = by_id[tid]
-        tc = inst["test_cmds"]
-        warm = tc if isinstance(tc, str) else " && ".join(tc)
         image = build_sanitized_image(image_name(tid), inst["base_commit"], f"e2-prebaked:{tid}",
-                                      prebake_warm_cmd=warm)
+                                      prebake_warm_cmd=warm_cmd(inst))
         try:
             q = _gold_fail_quarantine(inst, image, 1800)
 
@@ -111,7 +98,7 @@ def main() -> None:
             print(f"  {tid:<46} {backend}_gap={rec['gap_rate']} resolve={rec['resolve_rate']} "
                   f"(DeepSeek ctrl gap={ds_ctrl_gap}) errors={errors}", flush=True)
         finally:
-            _reclaim(tid, image_name)
+            reclaim(f"e2-prebaked:{tid}", image_name(tid))
 
     json.dump({"run_id": f"e2-{backend}-gap-probe-20260617-001", "classification": "calibration",
                "backend": backend, "note": "second-model gap probe; NOT the controlled ablation",

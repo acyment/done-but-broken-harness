@@ -45,23 +45,22 @@ CERTIFIED = [
 CERT_FLAKY = {
     "casbin__pycasbin-392": {"tests/test_fast_enforcer.py::TestFastEnforcer::test_performance"},
 }
-# Frozen per-model routes live in the package (single source of truth, replay-validity).
+# Shared scaffolding + frozen per-model routes live in the package (single source of truth).
+from hit_sdd_e2._cli.args import arg
+from hit_sdd_e2._cli.dataset import load_by_id
+from hit_sdd_e2._cli.dataset import warm_cmd as warm_command
 from hit_sdd_e2._cli.routes import resolve_route
 
 MODEL_ROUTE = resolve_route()  # selector from E2_MODEL (default deepseek); ad-hoc env overrides apply
 RUN_ID = MODEL_ROUTE["run_id"]
 
 
-def _arg(flag, default):
-    return type(default)(sys.argv[sys.argv.index(flag) + 1]) if flag in sys.argv else default
-
-
 def main() -> None:
-    n = _arg("--n", 10)
-    agent_cc = _arg("--agent-cc", 4)
-    score_cc = _arg("--score-cc", 1)
-    limit = _arg("--limit", len(CERTIFIED))  # smoke a few tasks first before the full 13
-    only = _arg("--tasks", "")  # comma-sep instance_ids to run exactly these (else CERTIFIED[:limit])
+    n = arg("--n", 10)
+    agent_cc = arg("--agent-cc", 4)
+    score_cc = arg("--score-cc", 1)
+    limit = arg("--limit", len(CERTIFIED))  # smoke a few tasks first before the full 13
+    only = arg("--tasks", "")  # comma-sep instance_ids to run exactly these (else CERTIFIED[:limit])
     task_ids = [t for t in only.split(",") if t in CERTIFIED] if only else CERTIFIED[:limit]
     api_key_env = MODEL_ROUTE["api_key_env"]
     authorized = os.environ.get("E2_AUTHORIZE_PHASE15") == "1" and os.environ.get(api_key_env)
@@ -81,28 +80,21 @@ def main() -> None:
         return
 
     # ---- authorized run path (Docker + provider spend) ----
-    from datasets import load_dataset
-
     from hit_sdd_e2.agent.openhands_agent import OpenHandsAgent
     from hit_sdd_e2.orchestrate.phase1_5 import Phase15Task, run_phase1_5
     from hit_sdd_e2.orchestrate.phase1_5_analysis import family_wise
 
-    ds = load_dataset("SWE-bench-Live/SWE-bench-Live", split="test")
-    by_id = {x["instance_id"]: x for x in ds if x["instance_id"] in set(task_ids)}
-
-    def warm_of(inst):
-        tc = inst["test_cmds"]
-        return tc if isinstance(tc, str) else " && ".join(tc)
+    by_id = load_by_id(task_ids)
 
     # The runner builds each task's image once, computes the gold-fail quarantine inline (disk-safe),
     # runs the rollouts, then reclaims — no pre-build loop (which would hold all 13 images at once).
     tasks = [Phase15Task(by_id[tid], quarantine=frozenset(CERT_FLAKY.get(tid, set())),
-                         warm_cmd=warm_of(by_id[tid])) for tid in task_ids]
+                         warm_cmd=warm_command(by_id[tid])) for tid in task_ids]
 
     agent = OpenHandsAgent(model_route=MODEL_ROUTE, api_key=os.environ[api_key_env])
     # scoring timeout: a legit suite-run on these tasks is seconds-to-minutes; >10min means a broken
     # candidate patch hung the suite (the diagnosed "hang"). Fail fast -> excluded error, run continues.
-    score_timeout = _arg("--score-timeout", 600)
+    score_timeout = arg("--score-timeout", 600)
     out = run_phase1_5(tasks, agent, run_id=RUN_ID, model_route=MODEL_ROUTE["model"],
                        runs_per_arm=n, agent_concurrency=agent_cc, score_concurrency=score_cc,
                        score_timeout=score_timeout, checkpoint_path=f"{RUN_ID}.json", progress=True)

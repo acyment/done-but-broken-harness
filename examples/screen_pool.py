@@ -20,11 +20,13 @@ Usage: DEEPSEEK_API_KEY=... uv run --extra agent --extra data python examples/sc
 import json
 import os
 
-os.environ.setdefault("OPENHANDS_SUPPRESS_BANNER", "1")
+from hit_sdd_e2._cli.env import suppress_openhands_banner
 
-import litellm  # noqa: E402
-from datasets import load_dataset  # noqa: E402
+suppress_openhands_banner()
 
+from hit_sdd_e2._cli.completion import litellm_complete  # noqa: E402
+from hit_sdd_e2._cli.dataset import load_by_id  # noqa: E402
+from hit_sdd_e2._cli.routes import litellm_route  # noqa: E402
 from hit_sdd_e2.memorization.probe import (  # noqa: E402
     calibrate_threshold,
     flag_memorized,
@@ -35,7 +37,6 @@ from hit_sdd_e2.memorization.probe_exec import (  # noqa: E402
     code_continuation_probe,
     file_path_id_probe,
 )
-from hit_sdd_e2._cli.routes import litellm_route  # noqa: E402
 
 POOL = os.environ.get(
     "E2_SCREEN_POOL",
@@ -64,11 +65,8 @@ _ZEN_SUFFIX = (
 
 def deepseek_complete(prompt: str) -> str:
     route = litellm_route("deepseek")
-    r = litellm.completion(
-        model=route["model"], base_url=route["base_url"], api_key=os.environ[route["api_key_env"]],
-        messages=[{"role": "user", "content": prompt}], max_tokens=8000, temperature=0,
-    )
-    return r.choices[0].message.content or ""
+    return litellm_complete(prompt, model=route["model"], base_url=route["base_url"],
+                            api_key=os.environ[route["api_key_env"]], max_tokens=8000)
 
 
 def positive_control() -> float:
@@ -81,8 +79,7 @@ def positive_control() -> float:
 def main() -> None:
     pool_ids = [i["instance_id"] for i in json.load(open(POOL))["instances"]]
     want = set(pool_ids)
-    ds = load_dataset("SWE-bench-Live/SWE-bench-Live", split="test")
-    by_id = {x["instance_id"]: x for x in ds if x["instance_id"] in want}
+    by_id = load_by_id(pool_ids)
     missing = want - set(by_id)
     if missing:
         print(f"WARNING: {len(missing)} pool ids not in dataset: {sorted(missing)[:5]}...")

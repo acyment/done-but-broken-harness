@@ -12,8 +12,7 @@ import json
 import sys
 import time
 
-from datasets import load_dataset
-
+from hit_sdd_e2._cli.dataset import load_by_id
 from hit_sdd_e2.oracle.swebench_eval import image_name, run_eval
 
 POOL = "/Users/acyment/dev/hit-sdd-bench/docs/protocols/e2-phase1-5-candidate-pool-v1.json"
@@ -29,8 +28,7 @@ def main() -> None:
     ranked = sorted((pool[c] for c in clean), key=lambda i: (i["P2P"], i["non_test_files"]))
     targets = [i["instance_id"] for i in ranked][:limit]
 
-    ds = load_dataset("SWE-bench-Live/SWE-bench-Live", split="test")
-    by_id = {x["instance_id"]: x for x in ds if x["instance_id"] in set(targets)}
+    by_id = load_by_id(targets)
 
     results = []
     for tid in targets:

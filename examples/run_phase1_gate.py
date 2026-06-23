@@ -8,11 +8,12 @@ Usage: DEEPSEEK_API_KEY=... uv run --extra agent --extra data python examples/ru
 import json
 import os
 
-os.environ.setdefault("OPENHANDS_SUPPRESS_BANNER", "1")
+from hit_sdd_e2._cli.env import suppress_openhands_banner
 
-import litellm  # noqa: E402
-from datasets import load_dataset  # noqa: E402
+suppress_openhands_banner()
 
+from hit_sdd_e2._cli.completion import litellm_complete  # noqa: E402
+from hit_sdd_e2._cli.dataset import load_by_id  # noqa: E402
 from hit_sdd_e2._cli.routes import litellm_route  # noqa: E402
 from hit_sdd_e2.determinism.certify import certify_task  # noqa: E402
 from hit_sdd_e2.memorization.probe_exec import file_path_id_probe  # noqa: E402
@@ -32,17 +33,12 @@ RUN_ID = "e2-phase1-gate-deepseek-v4-pro-20260614-001"
 
 def deepseek_complete(prompt: str) -> str:
     route = litellm_route("deepseek")
-    r = litellm.completion(
-        model=route["model"], base_url=route["base_url"], api_key=os.environ[route["api_key_env"]],
-        messages=[{"role": "user", "content": prompt}], max_tokens=3000, temperature=0,
-    )
-    return r.choices[0].message.content or ""
+    return litellm_complete(prompt, model=route["model"], base_url=route["base_url"],
+                            api_key=os.environ[route["api_key_env"]], max_tokens=3000)
 
 
 def main() -> None:
-    ds = load_dataset("SWE-bench-Live/SWE-bench-Live", split="test")
-    by_id = {x["instance_id"]: x for x in ds
-             if x["instance_id"] in set(MEMO_TASKS + [FLAKE_TASK])}
+    by_id = load_by_id(MEMO_TASKS + [FLAKE_TASK])
 
     print("===== GATE B: memorization probe (issue-only file-path id) =====")
     memo = {}
