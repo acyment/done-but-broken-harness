@@ -1,5 +1,5 @@
 [project]
-name = "hit-sdd-bench-e2"
+name = "done-but-broken-harness"
 version = "0.0.0"
 description = "E2 brownfield acceptance-feedback ablation harness (Python/Docker). Code only; the scientific record lives in hit-sdd-bench."
 requires-python = ">=3.12"
