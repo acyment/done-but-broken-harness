@@ -1,0 +1,41 @@
+{
+ "run_id": "e2-codex-gap-probe-20260617-001",
+ "classification": "calibration",
+ "backend": "codex",
+ "note": "second-model gap probe; NOT the controlled ablation",
+ "rows": [
+  {
+   "instance_id": "pypa__twine-1249",
+   "backend": "codex",
+   "n": 5,
+   "valid": 5,
+   "errors": 0,
+   "gap_rate": 1.0,
+   "resolve_rate": 0.0,
+   "deepseek_control_gap": 1.0,
+   "quarantine": 0
+  },
+  {
+   "instance_id": "django-guardian__django-guardian-899",
+   "backend": "codex",
+   "n": 5,
+   "valid": 5,
+   "errors": 0,
+   "gap_rate": 0.4,
+   "resolve_rate": 0.6,
+   "deepseek_control_gap": 1.0,
+   "quarantine": 0
+  },
+  {
+   "instance_id": "django-json-api__django-rest-framework-json-api-1283",
+   "backend": "codex",
+   "n": 5,
+   "valid": 5,
+   "errors": 0,
+   "gap_rate": 0.6,
+   "resolve_rate": 0.4,
+   "deepseek_control_gap": 0.7,
+   "quarantine": 0
+  }
+ ]
+}

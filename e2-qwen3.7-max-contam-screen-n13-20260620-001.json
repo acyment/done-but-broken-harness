@@ -1,0 +1,326 @@
+{
+ "run_id": "e2-qwen3.7-max-contam-screen-n13-20260620-001",
+ "classification": "calibration",
+ "model": "qwen3.7-max",
+ "pool": "e2-qwen-screen-pool-n13 (Addendum B n=13 certified)",
+ "positive_control": {
+  "probe": "zen-of-python-continuation",
+  "overlap": 1.0,
+  "instrument_sensitive": true
+ },
+ "negative_control": {
+  "method": "cross-task code-continuation n-gram (n=5) overlap; 95th-pct + absolute floor",
+  "n_pairs": 72,
+  "n_tasks_probed": 9,
+  "cross_task_95pct": 0.0,
+  "verbatim_floor": 0.5,
+  "threshold_applied": 0.5,
+  "note": "cross-task null is degenerate (~0, different repos share no 5-grams); floored in the gap between the reconstruction ceiling and the positive-control regime. Decision invariant for any floor in [0.3, 1.0)."
+ },
+ "exclusion_rule": {
+  "primary_verbatim": "continuation_overlap > negative_control_95pct (decisive)",
+  "precautionary_localization": "file_path_hit_rate >= 0.75"
+ },
+ "rows": [
+  {
+   "instance_id": "spulec__freezegun-582",
+   "repo": "spulec/freezegun",
+   "file_path_hit_rate": 0.5,
+   "fp_predicted": [
+    "freezegun/api.py"
+   ],
+   "fp_gold": [
+    "CHANGELOG",
+    "freezegun/api.py"
+   ],
+   "continuation_file": null,
+   "continuation_overlap": null,
+   "memorized_verbatim": false,
+   "high_localization": false,
+   "excluded": false
+  },
+  {
+   "instance_id": "pypa__twine-1249",
+   "repo": "pypa/twine",
+   "file_path_hit_rate": 0.25,
+   "fp_predicted": [
+    "twine/commands/upload.py",
+    "twine/repository.py",
+    "twine/auth.py"
+   ],
+   "fp_gold": [
+    ".coveragerc",
+    "changelog/1246.feature.rst",
+    "twine/__init__.py",
+    "twine/auth.py"
+   ],
+   "continuation_file": "twine/auth.py",
+   "continuation_overlap": 0.0,
+   "memorized_verbatim": false,
+   "high_localization": false,
+   "excluded": false
+  },
+  {
+   "instance_id": "casbin__pycasbin-392",
+   "repo": "casbin/pycasbin",
+   "file_path_hit_rate": 0.0,
+   "fp_predicted": [
+    "casbin/management_api.py",
+    "casbin/internal_api.py"
+   ],
+   "fp_gold": [
+    "casbin/management_enforcer.py",
+    "casbin/persist/adapters/file_adapter.py",
+    "casbin/synced_enforcer.py"
+   ],
+   "continuation_file": null,
+   "continuation_overlap": null,
+   "memorized_verbatim": false,
+   "high_localization": false,
+   "excluded": false
+  },
+  {
+   "instance_id": "django-guardian__django-guardian-899",
+   "repo": "django-guardian/django-guardian",
+   "file_path_hit_rate": 0.0,
+   "fp_predicted": [
+    "guardian/utils.py"
+   ],
+   "fp_gold": [
+    "guardian/apps.py",
+    "guardian/shortcuts.py"
+   ],
+   "continuation_file": null,
+   "continuation_overlap": null,
+   "memorized_verbatim": false,
+   "high_localization": false,
+   "excluded": false
+  },
+  {
+   "instance_id": "django-json-api__django-rest-framework-json-api-1283",
+   "repo": "django-json-api/django-rest-framework-json-api",
+   "file_path_hit_rate": 0.25,
+   "fp_predicted": [
+    "rest_framework_json_api/serializers.py",
+    "rest_framework_json_api/views.py"
+   ],
+   "fp_gold": [
+    "CHANGELOG.md",
+    "rest_framework_json_api/renderers.py",
+    "rest_framework_json_api/serializers.py",
+    "rest_framework_json_api/utils.py"
+   ],
+   "continuation_file": "rest_framework_json_api/renderers.py",
+   "continuation_overlap": 0.0,
+   "memorized_verbatim": false,
+   "high_localization": false,
+   "excluded": false
+  },
+  {
+   "instance_id": "psf__black-4684",
+   "repo": "psf/black",
+   "file_path_hit_rate": 0.5,
+   "fp_predicted": [
+    "src/black/linegen.py",
+    "src/black/nodes.py"
+   ],
+   "fp_gold": [
+    "CHANGES.md",
+    "src/black/linegen.py"
+   ],
+   "continuation_file": "src/black/linegen.py",
+   "continuation_overlap": 0.0,
+   "memorized_verbatim": false,
+   "high_localization": false,
+   "excluded": false
+  },
+  {
+   "instance_id": "psf__black-4670",
+   "repo": "psf/black",
+   "file_path_hit_rate": 0.5,
+   "fp_predicted": [
+    "src/black/ranges.py",
+    "src/black/parsing.py",
+    "src/black/__init__.py"
+   ],
+   "fp_gold": [
+    "CHANGES.md",
+    "src/black/ranges.py"
+   ],
+   "continuation_file": null,
+   "continuation_overlap": null,
+   "memorized_verbatim": false,
+   "high_localization": false,
+   "excluded": false
+  },
+  {
+   "instance_id": "koxudaxi__datamodel-code-generator-2408",
+   "repo": "koxudaxi/datamodel-code-generator",
+   "file_path_hit_rate": 0.3333333333333333,
+   "fp_predicted": [
+    "datamodel_code_generator/__main__.py",
+    "datamodel_code_generator/model/dataclass.py",
+    "datamodel_code_generator/parser/base.py",
+    "datamodel_code_generator/model/base.py"
+   ],
+   "fp_gold": [
+    "README.md",
+    "docs/index.md",
+    "src/datamodel_code_generator/__init__.py",
+    "src/datamodel_code_generator/__main__.py",
+    "src/datamodel_code_generator/arguments.py",
+    "src/datamodel_code_generator/model/base.py",
+    "src/datamodel_code_generator/model/dataclass.py",
+    "src/datamodel_code_generator/model/template/dataclass.jinja2",
+    "src/datamodel_code_generator/parser/base.py",
+    "src/datamodel_code_generator/parser/graphql.py",
+    "src/datamodel_code_generator/parser/jsonschema.py",
+    "src/datamodel_code_generator/parser/openapi.py"
+   ],
+   "continuation_file": "src/datamodel_code_generator/parser/base.py",
+   "continuation_overlap": 0.0,
+   "memorized_verbatim": false,
+   "high_localization": false,
+   "excluded": false
+  },
+  {
+   "instance_id": "koxudaxi__datamodel-code-generator-2461",
+   "repo": "koxudaxi/datamodel-code-generator",
+   "file_path_hit_rate": 0.4,
+   "fp_predicted": [
+    "datamodel_code_generator/parser/jsonschema.py",
+    "datamodel_code_generator/parser/base.py",
+    "datamodel_code_generator/reference.py",
+    "datamodel_code_generator/model/base.py",
+    "datamodel_code_generator/model/pydantic_v2/root_model.py"
+   ],
+   "fp_gold": [
+    "README.md",
+    "docs/index.md",
+    "src/datamodel_code_generator/arguments.py",
+    "src/datamodel_code_generator/model/base.py",
+    "src/datamodel_code_generator/parser/jsonschema.py"
+   ],
+   "continuation_file": "src/datamodel_code_generator/parser/jsonschema.py",
+   "continuation_overlap": 0.391304347826087,
+   "memorized_verbatim": false,
+   "high_localization": false,
+   "excluded": false
+  },
+  {
+   "instance_id": "celery__kombu-2300",
+   "repo": "celery/kombu",
+   "file_path_hit_rate": 0.25,
+   "fp_predicted": [
+    "kombu/transport/SQS.py"
+   ],
+   "fp_gold": [
+    ".gitignore",
+    "AUTHORS",
+    "kombu/asynchronous/aws/sqs/connection.py",
+    "kombu/transport/SQS.py"
+   ],
+   "continuation_file": "kombu/transport/SQS.py",
+   "continuation_overlap": 0.0,
+   "memorized_verbatim": false,
+   "high_localization": false,
+   "excluded": false
+  },
+  {
+   "instance_id": "mlco2__codecarbon-831",
+   "repo": "mlco2/codecarbon",
+   "file_path_hit_rate": 0.0,
+   "fp_predicted": [
+    "codecarbon/external/hardware.py"
+   ],
+   "fp_gold": [
+    "codecarbon/_version.py",
+    "codecarbon/emissions_tracker.py",
+    "docs/.buildinfo",
+    "docs/_static/documentation_options.js",
+    "docs/advanced_installation.html",
+    "docs/api.html",
+    "docs/comet.html",
+    "docs/edit/conf.py",
+    "docs/examples.html",
+    "docs/faq.html",
+    "docs/genindex.html",
+    "docs/index.html",
+    "docs/installation.html",
+    "docs/methodology.html",
+    "docs/model_examples.html",
+    "docs/motivation.html",
+    "docs/output.html",
+    "docs/parameters.html",
+    "docs/search.html",
+    "docs/to_logger.html",
+    "docs/usage.html",
+    "docs/visualize.html",
+    "pyproject.toml"
+   ],
+   "continuation_file": "codecarbon/emissions_tracker.py",
+   "continuation_overlap": 0.14285714285714285,
+   "memorized_verbatim": false,
+   "high_localization": false,
+   "excluded": false
+  },
+  {
+   "instance_id": "python-attrs__attrs-1448",
+   "repo": "python-attrs/attrs",
+   "file_path_hit_rate": 0.3333333333333333,
+   "fp_predicted": [
+    "src/attr/validators.py"
+   ],
+   "fp_gold": [
+    "changelog.d/1448.change.md",
+    "src/attr/validators.py",
+    "src/attr/validators.pyi"
+   ],
+   "continuation_file": "src/attr/validators.py",
+   "continuation_overlap": 0.21212121212121213,
+   "memorized_verbatim": false,
+   "high_localization": false,
+   "excluded": false
+  },
+  {
+   "instance_id": "dpkp__kafka-python-2608",
+   "repo": "dpkp/kafka-python",
+   "file_path_hit_rate": 0.5,
+   "fp_predicted": [
+    "kafka/conn.py"
+   ],
+   "fp_gold": [
+    "kafka/cluster.py",
+    "kafka/conn.py"
+   ],
+   "continuation_file": "kafka/conn.py",
+   "continuation_overlap": 0.2702702702702703,
+   "memorized_verbatim": false,
+   "high_localization": false,
+   "excluded": false
+  }
+ ],
+ "clean_set": [
+  "spulec__freezegun-582",
+  "pypa__twine-1249",
+  "casbin__pycasbin-392",
+  "django-guardian__django-guardian-899",
+  "django-json-api__django-rest-framework-json-api-1283",
+  "psf__black-4684",
+  "psf__black-4670",
+  "koxudaxi__datamodel-code-generator-2408",
+  "koxudaxi__datamodel-code-generator-2461",
+  "celery__kombu-2300",
+  "mlco2__codecarbon-831",
+  "python-attrs__attrs-1448",
+  "dpkp__kafka-python-2608"
+ ],
+ "n_clean": 13,
+ "excluded_verbatim_memorized": [],
+ "excluded_high_localization": [],
+ "provider_route": {
+  "litellm_model": "openai/qwen3.7-max",
+  "base_url": "https://ws-5dm04o3gxwrj8eud.eu-central-1.maas.aliyuncs.com/compatible-mode/v1",
+  "api_key_env": "DASHSCOPE_API_KEY"
+ }
+}
