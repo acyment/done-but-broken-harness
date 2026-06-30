@@ -20,6 +20,23 @@ def test_frozen_literals_present_and_exact():
     assert ROUTES["flash"]["litellm_model"] == "openai/deepseek-v4-flash"
 
 
+def test_glm_author_route_present_and_non_participant():
+    glm = ROUTES["glm"]
+    assert glm["model"] == "openai/glm-5.2"
+    assert glm["litellm_model"] == "openai/glm-5.2"
+    assert glm["api_key_env"] == "ZHIPU_API_KEY"
+    assert glm["base_url"] == "https://open.bigmodel.cn/api/paas/v4"
+    assert glm["run_id"] == "e2-authored-spec-glm-author"
+    # author must be off both agent-under-test lineages (A4)
+    assert glm["provider"] not in {ROUTES["deepseek"]["provider"], ROUTES["qwen"]["provider"]}
+
+
+def test_glm_base_url_override():
+    r = resolve_route(env={"E2_MODEL": "glm", "E2_GLM_BASE_URL": "https://api.z.ai/api/paas/v4"})
+    assert r["base_url"] == "https://api.z.ai/api/paas/v4"
+    assert litellm_route("glm")["model"] == "openai/glm-5.2"
+
+
 def test_resolve_route_default_is_deepseek():
     r = resolve_route(env={})
     assert r["model"] == "deepseek-v4-pro" and r["api_key_env"] == "DEEPSEEK_API_KEY"

@@ -59,6 +59,16 @@ def _routes(env: Mapping[str, str] | None = None) -> dict[str, dict]:
             "api_key_env": "DEEPSEEK_API_KEY",
             "run_id": "e2-flash-screen",
         },
+        "glm": {  # GLM 5.2 (Zhipu) — the non-participant SPEC AUTHOR for the authored-spec study (A4).
+            # Used experimenter-side to author OpenSpec/Gherkin specs; it is NOT an agent-under-test and
+            # is NOT pooled or compared with deepseek/qwen. Chosen to be off both lineages so the oracle
+            # author cannot correlate with the solver. OpenAI-compatible via litellm.
+            "provider": "zhipu", "model": "openai/glm-5.2",
+            "base_url": env.get("E2_GLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4"),
+            "litellm_model": "openai/glm-5.2",
+            "api_key_env": "ZHIPU_API_KEY",
+            "run_id": "e2-authored-spec-glm-author",
+        },
     }
 
 
