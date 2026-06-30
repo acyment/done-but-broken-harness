@@ -173,13 +173,16 @@ ASSERTION_PATTERNS = (
 )
 
 # Tautological / vacuous assertions: pass regardless of behavior, or assert a constant.
+# NOTE: `== 1` / `== True` are intentionally NOT here — they are common CONCRETE expected values
+# (1 second, 1 item, a boolean result). Banning the literal would reject the *good* value-level
+# assertions we want; genuine vacuity is caught by the dynamic discrimination half (PASS on gold AND
+# FAIL on the no-op patch), not by a static literal ban.
 WEAK_ASSERTION_PATTERNS = (
     r"\bassert\s+True\b",
     r"\bassert\s+1\b",
     r"\bassertTrue\(\s*True\s*\)",
     r"\bis\s+not\s+None\b",
     r"!=\s*None\b",
-    r"==\s*(True|1)\b",
 )
 
 

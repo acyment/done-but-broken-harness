@@ -134,6 +134,13 @@ def test_audit_assertion_flags_weak_is_not_none():
     assert v["passed"] is False
 
 
+def test_audit_assertion_concrete_one_is_not_weak():
+    # `== 1` is a concrete expected value (1 second/item), NOT a vacuous constant.
+    v = audit_assertion("assert parse_duration('1s') == 1", then_reference="1")
+    assert v["weak"] is False
+    assert v["passed"] is True
+
+
 def test_audit_assertion_flags_missing_assertion():
     v = audit_assertion("result = client.compute()", then_reference="total_kwh")
     assert v["has_assertion"] is False

@@ -147,18 +147,23 @@ class AuthoredSpecDraft:
 # --- JSON / slug helpers ----------------------------------------------------------------------------
 
 def _extract_json(text: str) -> Any:
-    """Parse a JSON object/array from a model reply, tolerating ```json fences and surrounding prose."""
-    fenced = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
-    candidate = fenced.group(1).strip() if fenced else text.strip()
-    try:
-        return json.loads(candidate)
-    except json.JSONDecodeError:
-        pass
-    start = min((i for i in (candidate.find("{"), candidate.find("[")) if i != -1), default=-1)
-    if start == -1:
-        raise ValueError(f"no JSON found in model reply: {text[:200]!r}")
-    end = max(candidate.rfind("}"), candidate.rfind("]"))
-    return json.loads(candidate[start : end + 1])
+    """Parse the first JSON object/array from a model reply, tolerating ```json fences, surrounding
+    prose, and trailing text. Scans each `{`/`[` with `raw_decode` (parses one valid value, ignores the
+    rest) so a brace inside prose or a trailing note can't break extraction."""
+    fenced = [c.strip() for c in re.findall(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)]
+    decoder = json.JSONDecoder()
+    for candidate in [*fenced, text.strip()]:
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+        for match in re.finditer(r"[{\[]", candidate):
+            try:
+                obj, _ = decoder.raw_decode(candidate, match.start())
+                return obj
+            except json.JSONDecodeError:
+                continue
+    raise ValueError(f"no JSON found in model reply: {text[:200]!r}")
 
 
 def _slug(name: str, *, index: int) -> str:
@@ -235,13 +240,20 @@ def author_spec(
     """
     messages: list[dict[str, str]] = []
 
-    def _call(role: str, prompt: str) -> str:
-        reply = complete(prompt)
-        messages.append({"role": role, "content": reply})
-        return reply
+    def _call_json(role: str, prompt: str, *, retries: int = 1) -> Any:
+        last: Exception | None = None
+        for attempt in range(retries + 1):
+            p = prompt if attempt == 0 else prompt + "\n\nReturn ONLY valid JSON — no prose, no fences."
+            reply = complete(p)
+            messages.append({"role": role, "content": reply})
+            try:
+                return _extract_json(reply)
+            except ValueError as e:
+                last = e
+        raise last
 
     business_prompt = f"{BUSINESS_PROMPT_V2}\n\n## Issue\n{issue_text}"
-    business = _extract_json(_call("business", business_prompt))
+    business = _call_json("business", business_prompt)
     requirement = str(business.get("requirement", "")).strip()
     why = str(business.get("why", "")).strip()
     base_scenarios = business.get("scenarios", [])
@@ -250,14 +262,14 @@ def author_spec(
         f"{QA_PROMPT_V2}\n\n## Issue\n{issue_text}\n\n## Current scenarios\n"
         f"{json.dumps(base_scenarios, indent=1)}"
     )
-    qa = _extract_json(_call("qa", qa_prompt))
+    qa = _call_json("qa", qa_prompt)
     scenarios = qa.get("scenarios", base_scenarios)
 
     dev_prompt = (
         f"{DEV_PROMPT_V2}\n\n## Public surface\n{public_surface_summary}\n\n## Scenarios\n"
         f"{json.dumps(scenarios, indent=1)}"
     )
-    dev = _extract_json(_call("dev", dev_prompt))
+    dev = _call_json("dev", dev_prompt)
     bindings = {str(b.get("name")): b for b in dev.get("bindings", [])}
 
     kept: list[AuthoredScenario] = []
