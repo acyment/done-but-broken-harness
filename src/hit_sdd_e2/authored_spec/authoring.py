@@ -160,12 +160,14 @@ def _slug(name: str, *, index: int) -> str:
 
 # --- Live GLM completer -----------------------------------------------------------------------------
 
-def glm_completer(*, max_tokens: int = 8000, temperature: float = 0.0) -> Completer:
+def glm_completer(*, max_tokens: int = 8000, temperature: float = 0.0, thinking: bool = False) -> Completer:
     """Bind a `complete(prompt) -> content` to the live `glm` route (Addendum A §A4 author).
 
-    GLM-5.2 is a reasoning model: reasoning tokens share the output budget, so `max_tokens` defaults
-    high (a small budget yields empty content). Lazily imports litellm; loads the key from the record-repo
-    `.env` if not already present in the environment.
+    GLM-5.2 auto-decides whether to "think"; left on, the open-ended QA prompt can burn the entire
+    output budget on reasoning and return EMPTY content. Authoring is structured generation steered by
+    the detailed role prompts, not a task that needs chain-of-thought — so thinking is DISABLED by default
+    (`{"thinking": {"type": "disabled"}}`), which keeps replies fast and non-empty. Lazily imports
+    litellm; loads the key from the record-repo `.env` if not already present in the environment.
     """
     from hit_sdd_e2._cli.completion import litellm_complete
     from hit_sdd_e2._cli.env import load_dotenv
@@ -175,16 +177,21 @@ def glm_completer(*, max_tokens: int = 8000, temperature: float = 0.0) -> Comple
     if route["api_key_env"] not in os.environ:
         load_dotenv(into=os.environ)
     api_key = os.environ[route["api_key_env"]]
+    extra_body = None if thinking else {"thinking": {"type": "disabled"}}
 
     def complete(prompt: str) -> str:
-        return litellm_complete(
+        reply = litellm_complete(
             prompt,
             model=route["model"],
             base_url=route["base_url"],
             api_key=api_key,
             max_tokens=max_tokens,
             temperature=temperature,
+            extra_body=extra_body,
         )
+        if not reply.strip():
+            raise RuntimeError("GLM author returned empty content (raise max_tokens or check thinking mode)")
+        return reply
 
     return complete
 
