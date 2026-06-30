@@ -108,6 +108,31 @@ def test_transcript_hash_deterministic():
     assert a["transcript_hash"] == b["transcript_hash"]
 
 
+def test_canonical_surface_tolerates_prose():
+    from hit_sdd_e2.authored_spec.authoring import _canonical_surface
+
+    assert _canonical_surface("public_api") == "public_api"
+    assert _canonical_surface("Python public API: from x import y") == "public_api"
+    assert _canonical_surface("HTTP API: POST /x") == "http"
+    assert _canonical_surface("CLI subprocess") == "cli"
+    assert _canonical_surface("???") == ""
+
+
+def test_author_spec_keeps_binding_with_prose_surface():
+    business = {"requirement": "r", "why": "w", "scenarios": [{"name": "rejects empty", "when": "w", "then": "400"}]}
+    qa = {"scenarios": business["scenarios"]}
+    dev = {"bindings": [{
+        "name": "rejects empty", "surface": "Python public API import", "observable": True,
+        "then_reference": "400", "step_code": "assert resp.status_code == 400", "reason": "ok",
+    }]}
+    draft = author_spec(
+        instance_id="x", issue_text="i", public_surface_summary="s",
+        complete=_fake_completer(business, qa, dev),
+    )
+    assert len(draft.scenarios) == 1
+    assert draft.scenarios[0].surface == "public_api"
+
+
 def test_extract_json_tolerates_fences_and_prose():
     assert _extract_json("```json\n{\"a\": 1}\n```") == {"a": 1}
     assert _extract_json("sure, here:\n{\"a\": [1, 2]}\nthanks") == {"a": [1, 2]}

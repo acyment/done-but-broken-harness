@@ -35,36 +35,45 @@ ALLOWED_SURFACES = ("public_api", "cli", "http")
 
 BUSINESS_PROMPT_V2 = (
     "You are the REQUIREMENTS author for an executable acceptance spec. From the GitHub issue text "
-    "ONLY, write the acceptance requirement and its rationale, plus the WHEN/THEN scenarios that "
-    "define 'done' for this change.\n"
-    "Rules: cover only behavior the issue states or directly entails; one scenario per distinct "
-    "observable outcome (no scenario multiplication for emphasis); describe observable outcomes, never "
+    "ONLY, write the acceptance requirement, its rationale, and the WHEN/THEN scenarios that define "
+    "'done' for this change.\n"
+    "GRANULARITY (strict): ONE scenario per distinct observable OUTCOME. When the SAME outcome holds "
+    "across many inputs, write ONE scenario whose THEN gives a parameter table — each input with its "
+    "concrete expected result — never repeat one outcome as several scenarios. Genuinely DISTINCT "
+    "outcomes (e.g. 'returns a value' vs 'raises an error') are separate scenarios.\n"
+    "CONCRETENESS (strict): state the CONCRETE expected result for each input — the actual computed "
+    "value (e.g. '1h30m' -> 5400) or the exact error/message — NEVER a type ('an int', 'a dict') or a "
+    "restatement of the input. Do the arithmetic.\n"
+    "Cover only behavior the issue states or directly entails; observable outcomes only, never "
     "implementation internals. You have NOT seen the fix; do not guess at private functions.\n"
     "Return ONLY JSON: {\"requirement\": str, \"why\": str, \"scenarios\": "
-    "[{\"name\": str, \"when\": str, \"then\": str}]}"
+    "[{\"name\": str, \"when\": str, \"then\": str}]}  (each `then` states the concrete expected result(s))."
 )
 
 QA_PROMPT_V2 = (
-    "You are the QA reviewer for an executable acceptance spec, with an adversarial mandate: surface the "
-    "MISSING edge, negative, and boundary scenarios that catch 'done but broken'. Stay strictly scoped "
-    "to behavior the issue states or directly entails — do NOT invent behavior the issue does not ask "
-    "for (out-of-scope scenarios get pruned and leak information).\n"
-    "Given the issue and the current scenarios, return the COMPLETE augmented scenario list (originals "
-    "plus your additions), same shape.\n"
+    "You are the QA reviewer for an executable acceptance spec, with an adversarial mandate: make each "
+    "scenario's input table EXHAUSTIVE over the distinct cases the issue implies, and surface the "
+    "MISSING edge/negative/boundary inputs that catch 'done but broken' — empty, whitespace, negative, "
+    "malformed, missing parts, wrong type, zero/boundary. Add each as a ROW (input + concrete expected "
+    "result) to the matching outcome's scenario; create a NEW scenario only for a genuinely DISTINCT "
+    "outcome. Do NOT multiply cosmetic variants into separate scenarios, and do NOT invent behavior the "
+    "issue does not state (out-of-scope rows get pruned and leak information).\n"
+    "Return the COMPLETE augmented scenario list, same shape, every result concrete.\n"
     "Return ONLY JSON: {\"scenarios\": [{\"name\": str, \"when\": str, \"then\": str}]}"
 )
 
 DEV_PROMPT_V2 = (
-    "You are the OBSERVABILITY/binding author. For each scenario, decide whether its THEN outcome is "
+    "You are the OBSERVABILITY/binding author. For each scenario decide whether its outcome is "
     "observable through the repo's PUBLIC SURFACE ONLY (public API import, CLI subprocess, or HTTP) — "
     "never private/internal functions or internal state. If observable, write a black-box pytest step "
-    "body that drives the public surface and asserts the specific THEN value.\n"
-    "For each scenario return: surface (one of public_api|cli|http), observable (bool), then_reference "
-    "(the exact value/condition the THEN asserts — a literal, field, status, or message; NOT 'is not "
-    "None'), step_code (python body that calls the public surface and asserts then_reference; '' if not "
-    "observable), reason.\n"
-    "Use the provided public-surface summary; do not import anything from tests/ or reference the gold "
-    "patch.\n"
+    "body that drives the public surface for EVERY input in the scenario and asserts the CONCRETE "
+    "expected result for each.\n"
+    "surface (strict): EXACTLY one bare token — public_api, cli, or http — and nothing else (no prose, "
+    "no import path).\n"
+    "then_reference (strict): ONE concrete literal that your step asserts and that appears VERBATIM in "
+    "step_code — e.g. '5400', 'ValueError', a field value, an HTTP status. NEVER a type ('an int', "
+    "'a dict') or 'is not None'.\n"
+    "Use the provided public-surface summary; never import from tests/ or reference the gold patch.\n"
     "Return ONLY JSON: {\"bindings\": [{\"name\": str, \"surface\": str, \"observable\": bool, "
     "\"then_reference\": str, \"step_code\": str, \"reason\": str}]}"
 )
@@ -158,6 +167,20 @@ def _slug(name: str, *, index: int) -> str:
     return s or f"scenario_{index + 1}"
 
 
+def _canonical_surface(raw: str) -> str:
+    """Map a model's surface label to one of ALLOWED_SURFACES, tolerating prose ('public API import')."""
+    t = (raw or "").strip().lower()
+    if t in ALLOWED_SURFACES:
+        return t
+    if "http" in t:
+        return "http"
+    if "cli" in t or "subprocess" in t or "command line" in t:
+        return "cli"
+    if "api" in t or "import" in t or "function" in t or "public" in t:
+        return "public_api"
+    return ""
+
+
 # --- Live GLM completer -----------------------------------------------------------------------------
 
 def glm_completer(*, max_tokens: int = 8000, temperature: float = 0.0, thinking: bool = False) -> Completer:
@@ -242,10 +265,11 @@ def author_spec(
     for i, sc in enumerate(scenarios):
         name = str(sc.get("name", "")) or f"scenario_{i + 1}"
         binding = bindings.get(name, {})
-        surface = str(binding.get("surface", "")).strip()
-        observable = bool(binding.get("observable")) and surface in ALLOWED_SURFACES
-        if not observable:
-            dropped.append({"name": name, "reason": str(binding.get("reason", "not observable at public surface"))})
+        surface = _canonical_surface(str(binding.get("surface", "")))
+        step_code = str(binding.get("step_code", ""))
+        white_box = binding.get("observable") is False  # only an explicit flag drops; missing => infer
+        if white_box or surface not in ALLOWED_SURFACES or not step_code.strip():
+            dropped.append({"name": name, "reason": str(binding.get("reason", "")) or "no public-surface binding produced"})
             continue
         kept.append(
             AuthoredScenario(
@@ -254,7 +278,7 @@ def author_spec(
                 then=str(sc.get("then", "")).strip(),
                 then_reference=str(binding.get("then_reference", "")).strip(),
                 surface=surface,
-                step_code=str(binding.get("step_code", "")),
+                step_code=step_code,
             )
         )
 
