@@ -32,8 +32,35 @@ from hit_sdd_e2.authored_spec.pilot import PILOT_INSTANCES, render_run_card, run
 # Public surface per pilot task — the repo's READ-ONLY public API, authored BLIND to the gold patch/tests.
 # FILL these from the repo before running; leaving a <FILL ...> placeholder aborts the run.
 SURFACES: dict[str, str] = {
-    "mlco2__codecarbon-831": "<FILL: codecarbon public API — EmissionsTracker + config keys (force_cpu_power, CPU load mode), the observable emissions/power outputs>",
-    "celery__kombu-2300": "<FILL: kombu SQS public API — Connection/Channel, transport_options.fetch_message_attributes, message attributes readable via consume/get>",
+    # Derived from each repo's read-only PUBLIC API at base_commit + the GitHub issue text (blind to the
+    # gold patch and gold tests). See docs/authored-spec-offline-pilot-runbook.md.
+    "mlco2__codecarbon-831": (
+        "Python public API (codecarbon public modules):\n"
+        "- `from codecarbon import EmissionsTracker`\n"
+        "- EmissionsTracker(project_name=..., force_cpu_power: int (watts)=None, force_mode_cpu_load: "
+        "bool=None, tracking_mode='machine'|'process', measure_power_secs=..., save_to_file=..., "
+        "output_dir=..., output_file=...). The same keys are also read from a `.codecarbon.config` file "
+        "(section [codecarbon]).\n"
+        "- Methods: .start(), .stop() -> float kg CO2eq (or None), .flush(), .start_task()/.stop_task().\n"
+        "- CPU power comes from an internal CPU hardware class (total_power / measure_power_and_energy); "
+        "with force_cpu_power set the tracker should use that fixed CPU power.\n"
+        "Issue behaviour: with force_cpu_power set AND the CPU in load mode (force_mode_cpu_load=True, or "
+        "the fallback when no RAPL/TDP source is available), constructing + start()/stop() must run "
+        "WITHOUT raising (currently raises TypeError: can't multiply sequence by non-int of type 'float')."
+    ),
+    "celery__kombu-2300": (
+        "Python public API (kombu SQS transport, public modules):\n"
+        "- `from kombu import Connection, Producer, Consumer`\n"
+        "- Connection('sqs://', transport_options={'fetch_message_attributes': [...], 'region': ...}); the "
+        "SQS Channel (kombu.transport.SQS.Channel) reads fetch_message_attributes from transport_options "
+        "and implements the SYNC receive path in _get(queue) / _get_bulk(queue) (async path: _get_async).\n"
+        "- Publish a message carrying SQS MessageAttributes via a Producer / basic_publish "
+        "(message_attributes=...); receive via a Consumer / drain_events / basic_get. SQS access is "
+        "through boto3, so a black-box test stands up a fake queue with a mocked boto3 SQS client.\n"
+        "Issue behaviour: fetch_message_attributes (transport_options) is applied on the ASYNC receive "
+        "path but NOT on the sync _get/_get_bulk, so message attributes published with a message are not "
+        "returned when the message is received through the sync path."
+    ),
 }
 
 BUNDLE_ROOT = Path("runs/authored-spec-offline-pilot")  # gitignored run outputs
