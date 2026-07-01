@@ -51,11 +51,22 @@ def render_feature(*, feature: str, description: str, scenarios: tuple[GherkinSc
 
 
 def render_step_module(scenario: GherkinScenario, *, feature_ref: str) -> str:
-    """Render a pytest-bdd step module binding exactly `scenario` from the feature at `feature_ref`."""
-    decorators = sorted({_KEYWORDS[s.keyword.lower()] for s in scenario.steps})
+    """Render a pytest-bdd step module binding exactly `scenario` from the feature at `feature_ref`.
+
+    `And`/`But` steps take the preceding concrete step's decorator (pytest-bdd matches by text; the
+    decorator carries the step type), so a `- **AND**` bullet under a WHEN binds as `@when`.
+    """
+    per_step: list[str] = []
+    last = "given"
+    for step in scenario.steps:
+        kw = step.keyword.lower()
+        decorator = last if kw in ("and", "but") else _KEYWORDS.get(kw, "then")
+        if kw not in ("and", "but"):
+            last = decorator
+        per_step.append(decorator)
     lines = [
         "import pytest",
-        f"from pytest_bdd import scenario as _bind, {', '.join(decorators)}",
+        f"from pytest_bdd import scenario as _bind, {', '.join(sorted(set(per_step)))}",
         *scenario.imports,
         "",
         "",
@@ -68,7 +79,6 @@ def render_step_module(scenario: GherkinScenario, *, feature_ref: str) -> str:
         "def test_check():",
         "    pass",
     ]
-    for i, step in enumerate(scenario.steps):
-        decorator = _KEYWORDS[step.keyword.lower()]
+    for i, (step, decorator) in enumerate(zip(scenario.steps, per_step)):
         lines += ["", "", f"@{decorator}({step.text!r})", f"def _step_{i}(context):", _indent(step.code)]
     return "\n".join(lines) + "\n"
