@@ -78,7 +78,7 @@ def gate_task(
     image: str | None = None,
     med: str = "x86_64",
     python_version: str | None = None,
-    flake_n: int = 60,
+    flake_n: int | None = 60,
     spec_runner: Callable[..., dict[str, str]] = run_authored_spec,
     validate: Callable[..., dict] = openspec_validate,
     vendor: Callable[..., Any] = vendor_pytest_bdd,
@@ -122,14 +122,17 @@ def gate_task(
     noop = non_triviality_gate(instance, bundle, bundle_root=str(bundle_root), image=image, spec_runner=spec_runner)
     log(f"[{iid}] gates: tautology (static+dynamic, reuses gold/no-op outcomes)")
     taut = tautology_audit(manifest, gold_outcomes=gold["outcomes"], noop_outcomes=noop["outcomes"], root=str(bundle_root))
-    log(f"[{iid}] gates: flake-cert (N={flake_n}, docker)")
-    flake = flake_certify_authored_checks(instance, bundle, n=flake_n, bundle_root=str(bundle_root), image=image, spec_runner=spec_runner)
+    if flake_n is None:  # screen mode: measure the deterministic gates only, defer the N-heavy flake cert
+        flake = {"passed": False, "deferred": True}
+    else:
+        log(f"[{iid}] gates: flake-cert (N={flake_n}, docker)")
+        flake = flake_certify_authored_checks(instance, bundle, n=flake_n, bundle_root=str(bundle_root), image=image, spec_runner=spec_runner)
 
     result.observability = bool(obs["passed"])
     result.gold_passes_spec = bool(gold["passed"])
     result.non_triviality = bool(noop["passed"])
     result.tautology = bool(taut["passed"])
-    result.flake_cert = bool(flake["passed"])
+    result.flake_cert = bool(flake.get("passed"))
     result.detail.update({"observability": obs, "gold_passes_spec": gold, "non_triviality": noop,
                           "tautology": taut, "flake_cert": flake})
     log(f"[{iid}] verdict: {result.verdict} (scenarios={result.n_scenarios})")

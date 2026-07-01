@@ -61,6 +61,12 @@ QA_PROMPT_V3 = (
     "DISTINCT outcome; do NOT multiply cosmetic variants (input variety belongs in the step code). Stay "
     "strictly scoped to behavior the issue states or entails (out-of-scope scenarios get pruned and leak "
     "information).\n"
+    "CRITICAL RESTRAINT: a correct reference implementation must pass EVERY scenario you keep, so add an "
+    "error/rejection/edge scenario ONLY when the issue text OR the public API's documented contract "
+    "GUARANTEES that behavior. Do NOT invent robustness the feature never promised — e.g. atomic rejection "
+    "of malformed input, specific empty-input / duplicate-handling / ordering semantics — an unwarranted "
+    "edge assertion wrongly fails a correct implementation and gets the whole spec rejected. When unsure a "
+    "behavior is guaranteed, OMIT that scenario.\n"
     "Return the COMPLETE augmented scenario list, same shape.\n"
     "Return ONLY JSON: {\"scenarios\": [{\"title\": str, \"steps\": [{\"keyword\": str, \"text\": str}]}]}"
 )
