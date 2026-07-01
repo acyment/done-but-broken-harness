@@ -27,6 +27,7 @@ import json
 from pathlib import Path
 
 from hit_sdd_e2.authored_spec.authoring import AuthoredSpecDraft
+from hit_sdd_e2.authored_spec.bdd_runtime import CONTAINER_VENDOR
 from hit_sdd_e2.authored_spec.bundle import AuthoredSpecBundle, compute_spec_hash_from_files
 from hit_sdd_e2.authored_spec.gherkin import GherkinScenario, GherkinStep, render_step_module
 from hit_sdd_e2.authored_spec.manifest import AuthoredCheck, CheckManifest, validate_check_manifest
@@ -102,7 +103,8 @@ def compile_draft(
         checks.append(
             AuthoredCheck(
                 name=scenario.name,
-                command=f"python -m pytest -q {CONTAINER_MOUNT}/{check_rel}",
+                command=(f"PYTHONPATH={CONTAINER_VENDOR} python -m pytest -q -p no:cacheprovider "
+                         f"{CONTAINER_MOUNT}/{check_rel}"),
                 surface=scenario.surface,
                 source_path=check_rel,
                 then_reference=scenario.then_reference or None,

@@ -65,7 +65,8 @@ def test_compiled_manifest_and_commands(tmp_path):
     manifest = CheckManifest.load(tmp_path / bundle.check_manifest_path)
     assert {c.name for c in manifest.checks} == {"adds_two_numbers", "accumulates_over_inputs"}
     for c in manifest.checks:
-        assert c.command == f"python -m pytest -q /authored_spec/{c.source_path}"
+        assert c.command == (f"PYTHONPATH=/authored_spec/vendor python -m pytest -q -p no:cacheprovider "
+                             f"/authored_spec/{c.source_path}")
         assert c.surface == "public_api"
 
 
