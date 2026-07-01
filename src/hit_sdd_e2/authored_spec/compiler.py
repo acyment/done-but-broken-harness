@@ -31,7 +31,7 @@ from hit_sdd_e2.authored_spec.bdd_runtime import CONTAINER_VENDOR
 from hit_sdd_e2.authored_spec.bundle import AuthoredSpecBundle, compute_spec_hash_from_files
 from hit_sdd_e2.authored_spec.gherkin import GherkinScenario, GherkinStep, render_step_module
 from hit_sdd_e2.authored_spec.manifest import AuthoredCheck, CheckManifest, validate_check_manifest
-from hit_sdd_e2.authored_spec.openspec import openspec_to_feature, parse_openspec_scenarios
+from hit_sdd_e2.authored_spec.openspec import CONVERTER_VERSION, openspec_to_feature, parse_openspec_scenarios
 
 CHECKS_DIRNAME = "checks"
 CONTAINER_MOUNT = "/authored_spec"
@@ -42,6 +42,7 @@ def _bindings_payload(draft: AuthoredSpecDraft) -> dict:
     return {
         "schema": "authored-spec-bindings-v1",
         "instance_id": draft.instance_id,
+        "converter_version": CONVERTER_VERSION,  # pins the OpenSpec->Gherkin derivation into the hash
         "bindings": [
             {
                 "title": sc.title,
@@ -117,10 +118,11 @@ def compile_draft(
     validate_check_manifest(manifest)
     (root / manifest_rel).write_text(json.dumps(manifest.to_dict(), indent=1, sort_keys=True) + "\n")
 
-    # NOTE: spec_hash currently covers proposal + manifest. Extending it to also cover bindings.json + the
-    # pinned converter version is tracked as pipeline stage (f) before any seal.
+    # spec_hash covers the canonical OpenSpec proposal + manifest + bindings.json (which carries the step
+    # code AND the pinned converter version) -> a sealed oracle fully determines the derived checks.
     spec_hash = compute_spec_hash_from_files(
-        openspec_proposal_path=root / proposal_rel, check_manifest_path=root / manifest_rel
+        openspec_proposal_path=root / proposal_rel, check_manifest_path=root / manifest_rel,
+        bindings_path=root / bindings_rel,
     )
     bundle = AuthoredSpecBundle(
         instance_id=iid,
@@ -128,6 +130,7 @@ def compile_draft(
         spec_hash=spec_hash,
         openspec_proposal_path=proposal_rel,
         check_manifest_path=manifest_rel,
+        bindings_path=bindings_rel,
         authoring_transcript_hash=draft.transcript.to_dict()["transcript_hash"],
     )
     bundle.dump(root / bundle_rel)

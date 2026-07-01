@@ -12,6 +12,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+# Pinned identity of the OpenSpec->Gherkin conversion logic. Bump on any change to the parse/render rules
+# so a sealed spec_hash (which covers this via bindings.json) fully determines the derived .feature.
+CONVERTER_VERSION = "openspec-gherkin-v1"
+
 _SCENARIO_RE = re.compile(r"^#{3,4}\s+Scenario:\s+(.+?)\s*$")
 _STEP_RE = re.compile(r"^\s*[-*]\s+\*\*(GIVEN|WHEN|THEN|AND|BUT)\*\*\s*:?\s+(.+?)\s*$", re.IGNORECASE)
 _KEYWORD = {"given": "Given", "when": "When", "then": "Then", "and": "And", "but": "But"}

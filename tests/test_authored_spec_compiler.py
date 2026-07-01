@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 
@@ -77,6 +78,17 @@ def test_compiled_bundle_hash_and_audits(tmp_path):
     assert audit_black_box_discipline(manifest, root=tmp_path)["passed"]
     for c in manifest.checks:
         assert audit_assertion(check_body_text(c, root=tmp_path), c.then_reference)["passed"], c.name
+
+
+def test_spec_hash_covers_bindings_and_converter_version(tmp_path):
+    bundle = compile_draft(_draft(), bundle_root=tmp_path)
+    bindings = json.loads((tmp_path / bundle.bindings_path).read_text())
+    assert bindings["converter_version"]  # converter version pinned into the hashed artifact
+    assert validate_bundle_hash(bundle, root=tmp_path)
+    # tampering the step code now invalidates the sealed hash (it didn't before stage f)
+    path = tmp_path / bundle.bindings_path
+    path.write_text(path.read_text().replace("context['v']", "context['HACKED']"))
+    assert validate_bundle_hash(bundle, root=tmp_path) is False
 
 
 def test_compile_rejects_empty_draft(tmp_path):

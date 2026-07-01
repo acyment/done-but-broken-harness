@@ -31,6 +31,9 @@ class AuthoredSpecBundle:
     # tautology audit (gates.tautology_audit). Kept optional for back-compat and for studies that opt
     # back into a battery; empty string = no battery (hashed as "").
     synthetic_patch_battery_manifest_path: str = ""
+    # Step-binding artifact (per-scenario step code + surface + then_reference + pinned converter version).
+    # Covered by spec_hash so the sealed oracle fully determines the derived .feature/checks. "" = none.
+    bindings_path: str = ""
     hardening_report: dict[str, Any] = field(default_factory=dict)
     flake_cert_report: dict[str, Any] = field(default_factory=dict)
     sealed_at: str | None = None
@@ -50,6 +53,7 @@ class AuthoredSpecBundle:
             openspec_proposal_path=data["openspec_proposal_path"],
             check_manifest_path=data["check_manifest_path"],
             synthetic_patch_battery_manifest_path=data.get("synthetic_patch_battery_manifest_path", ""),
+            bindings_path=data.get("bindings_path", ""),
             authoring_transcript_hash=data["authoring_transcript_hash"],
             hardening_report=dict(data.get("hardening_report") or {}),
             flake_cert_report=dict(data.get("flake_cert_report") or {}),
@@ -70,16 +74,20 @@ def compute_spec_hash(
     openspec_proposal_text: str,
     check_manifest_text: str,
     synthetic_patch_battery_text: str = "",
+    bindings_text: str = "",
 ) -> str:
     """Hash the authored oracle inputs as one deterministic sealed object.
 
-    `synthetic_patch_battery_text` defaults to "" (no battery — the tautology audit supersedes it);
-    it stays in the payload so hashes remain stable for studies that do attach a battery.
+    Covers the canonical OpenSpec proposal, the check manifest, and (`bindings_text`) the step-binding
+    artifact — which carries the executable step code AND the pinned OpenSpec->Gherkin converter version,
+    so a sealed `spec_hash` fully determines the derived `.feature`/checks. `synthetic_patch_battery_text`
+    defaults to "" (superseded by the tautology audit) but stays in the payload for stability.
     """
     payload = {
         "openspec_proposal": openspec_proposal_text,
         "check_manifest": check_manifest_text,
         "synthetic_patch_battery": synthetic_patch_battery_text,
+        "bindings": bindings_text,
     }
     return hash_text(json.dumps(payload, sort_keys=True, separators=(",", ":")))
 
@@ -89,16 +97,16 @@ def compute_spec_hash_from_files(
     openspec_proposal_path: str | Path,
     check_manifest_path: str | Path,
     synthetic_patch_battery_manifest_path: str | Path = "",
+    bindings_path: str | Path = "",
 ) -> str:
-    battery_text = (
-        Path(synthetic_patch_battery_manifest_path).read_text()
-        if synthetic_patch_battery_manifest_path
-        else ""
-    )
+    def _read(p: str | Path) -> str:
+        return Path(p).read_text() if p else ""
+
     return compute_spec_hash(
         openspec_proposal_text=Path(openspec_proposal_path).read_text(),
         check_manifest_text=Path(check_manifest_path).read_text(),
-        synthetic_patch_battery_text=battery_text,
+        synthetic_patch_battery_text=_read(synthetic_patch_battery_manifest_path),
+        bindings_text=_read(bindings_path),
     )
 
 
@@ -109,6 +117,7 @@ def validate_bundle_hash(bundle: AuthoredSpecBundle, *, root: str | Path = ".") 
         openspec_proposal_path=root / bundle.openspec_proposal_path,
         check_manifest_path=root / bundle.check_manifest_path,
         synthetic_patch_battery_manifest_path=(root / battery) if battery else "",
+        bindings_path=(root / bundle.bindings_path) if bundle.bindings_path else "",
     )
     return actual == bundle.spec_hash
 
