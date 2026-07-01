@@ -223,6 +223,50 @@ def glm_completer(*, max_tokens: int = 8000, temperature: float = 0.0, thinking:
 
 # --- The blind 3-role pipeline ----------------------------------------------------------------------
 
+def bindings_to_scenarios(
+    scenarios: list[dict], bindings_by_title: dict[str, dict]
+) -> tuple[list[GherkinScenario], list[dict[str, str]]]:
+    """Fold dev-role bindings onto their scenarios, keeping only publicly-observable ones with step code.
+
+    Shared by the initial author pass and the base-validation revision loop so both apply the exact same
+    observability guard.
+    """
+    kept: list[GherkinScenario] = []
+    dropped: list[dict[str, str]] = []
+    for i, sc in enumerate(scenarios):
+        title = str(sc.get("title", "")) or f"scenario_{i + 1}"
+        binding = bindings_by_title.get(title, {})
+        surface = _canonical_surface(str(binding.get("surface", "")))
+        steps = tuple(
+            GherkinStep(keyword=str(s.get("keyword", "then")).lower(), text=str(s.get("text", "")).strip(),
+                        code=str(s.get("code", "")))
+            for s in binding.get("steps", [])
+        )
+        white_box = binding.get("observable") is False
+        has_code = any(st.code.strip() for st in steps)
+        if white_box or surface not in ALLOWED_SURFACES or not has_code:
+            dropped.append({"title": title, "reason": str(binding.get("reason", "")) or "no public-surface binding produced"})
+            continue
+        kept.append(
+            GherkinScenario(
+                name=_slug(title, index=i), title=title, steps=steps, surface=surface,
+                then_reference=str(binding.get("then_reference", "")).strip(),
+                imports=tuple(str(x) for x in binding.get("imports", [])),
+            )
+        )
+    return kept, dropped
+
+
+def scenarios_to_bindings(scenarios: tuple[GherkinScenario, ...]) -> list[dict]:
+    """Serialize kept scenarios back to dev-binding shape (for the base-validation revision prompt)."""
+    return [
+        {"title": s.title, "surface": s.surface, "observable": True, "imports": list(s.imports),
+         "then_reference": s.then_reference,
+         "steps": [{"keyword": st.keyword, "text": st.text, "code": st.code} for st in s.steps]}
+        for s in scenarios
+    ]
+
+
 def author_spec(
     *,
     instance_id: str,
@@ -264,33 +308,7 @@ def author_spec(
         f"{json.dumps(scenarios, indent=1)}",
     )
     bindings = {str(b.get("title")): b for b in dev.get("bindings", [])}
-
-    kept: list[GherkinScenario] = []
-    dropped: list[dict[str, str]] = []
-    for i, sc in enumerate(scenarios):
-        title = str(sc.get("title", "")) or f"scenario_{i + 1}"
-        binding = bindings.get(title, {})
-        surface = _canonical_surface(str(binding.get("surface", "")))
-        steps = tuple(
-            GherkinStep(keyword=str(s.get("keyword", "then")).lower(), text=str(s.get("text", "")).strip(),
-                        code=str(s.get("code", "")))
-            for s in binding.get("steps", [])
-        )
-        white_box = binding.get("observable") is False
-        has_code = any(st.code.strip() for st in steps)
-        if white_box or surface not in ALLOWED_SURFACES or not has_code:
-            dropped.append({"title": title, "reason": str(binding.get("reason", "")) or "no public-surface binding produced"})
-            continue
-        kept.append(
-            GherkinScenario(
-                name=_slug(title, index=i),
-                title=title,
-                steps=steps,
-                surface=surface,
-                then_reference=str(binding.get("then_reference", "")).strip(),
-                imports=tuple(str(x) for x in binding.get("imports", [])),
-            )
-        )
+    kept, dropped = bindings_to_scenarios(scenarios, bindings)
 
     messages.append({"role": "reconcile", "content": "Human audit must approve the OpenSpec proposal before sealing."})
     transcript = AuthoringTranscript(instance_id=instance_id, prompts=dict(ROLE_PROMPTS_V3), messages=messages)

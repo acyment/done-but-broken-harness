@@ -34,11 +34,34 @@ def run_authored_spec(
     The SWE-bench gold `test_patch` is intentionally not applied here. The authored spec is the oracle
     for this design; SWE-bench gold is scored separately as external validity.
     """
+    diag = diagnose_authored_spec(
+        instance, candidate_patch, bundle, image=image, bundle_root=bundle_root,
+        network=network, platform=platform, timeout=timeout,
+    )
+    return {name: d["outcome"] for name, d in diag.items()}
+
+
+def diagnose_authored_spec(
+    instance: dict,
+    candidate_patch: str,
+    bundle: AuthoredSpecBundle,
+    *,
+    image: str | None = None,
+    bundle_root: str | Path = ".",
+    network: str = "none",
+    platform: str = "linux/amd64",
+    timeout: int = 600,
+) -> dict[str, dict[str, str]]:
+    """Like `run_authored_spec` but also captures the tail of each check's output (traceback / assertion).
+
+    Used by the author-time base-validation loop, which needs the actual exception (TypeError vs a clean
+    AssertionError) to tell a fidelity bug from a legitimate red-on-base scenario.
+    """
     root = Path(bundle_root)
     manifest = CheckManifest.load(root / bundle.check_manifest_path)
-    outcomes: dict[str, str] = {}
+    out: dict[str, dict[str, str]] = {}
     for check in manifest.checks:
-        outcomes[check.name] = _run_one_check(
+        outcome, tail = _run_one_check(
             instance,
             candidate_patch,
             command=check.command,
@@ -48,7 +71,8 @@ def run_authored_spec(
             platform=platform,
             timeout=timeout,
         )
-    return outcomes
+        out[check.name] = {"outcome": outcome, "tail": tail}
+    return out
 
 
 def _run_one_check(
@@ -61,7 +85,7 @@ def _run_one_check(
     network: str,
     platform: str,
     timeout: int,
-) -> str:
+) -> tuple[str, str]:
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         if candidate_patch:
@@ -84,15 +108,20 @@ def _run_one_check(
             "-v", f"{bundle_root.resolve()}:/authored_spec:ro",
             image, "bash", "-lc", script,
         ]
+        out = ""
         try:
-            rc = subprocess.run(
+            proc = subprocess.run(
                 docker_cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 timeout=timeout,
-            ).returncode
-        except subprocess.TimeoutExpired:
+                text=True,
+            )
+            rc = proc.returncode
+            out = proc.stdout or ""
+        except subprocess.TimeoutExpired as e:
             rc = -1
+            out = (e.stdout.decode("utf-8", "replace") if isinstance(e.stdout, bytes) else (e.stdout or ""))
         finally:
             try:
                 subprocess.run(
@@ -103,11 +132,12 @@ def _run_one_check(
                 )
             except subprocess.TimeoutExpired:
                 pass
+    tail = "\n".join((out or "").strip().splitlines()[-25:])
     if rc == 0:
-        return PASS
+        return PASS, tail
     if rc == -1:
-        return ERROR
-    return FAIL
+        return ERROR, tail
+    return FAIL, tail
 
 
 def sanitize_check_results(results: dict[str, str], *, expected_names: list[str] | tuple[str, ...]) -> dict[str, str]:

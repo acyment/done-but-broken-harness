@@ -79,6 +79,7 @@ def gate_task(
     med: str = "x86_64",
     python_version: str | None = None,
     flake_n: int | None = 60,
+    self_correct_k: int = 0,
     spec_runner: Callable[..., dict[str, str]] = run_authored_spec,
     validate: Callable[..., dict] = openspec_validate,
     vendor: Callable[..., Any] = vendor_pytest_bdd,
@@ -96,11 +97,20 @@ def gate_task(
     pyver = python_version or detect_python(image)
     vendor(Path(bundle_root) / VENDOR_DIRNAME, python_version=pyver)
 
-    log(f"[{iid}] author (blind) + openspec validate")
-    draft = author_spec(
-        instance_id=iid, issue_text=instance["problem_statement"],
-        public_surface_summary=public_surface_summary, complete=complete,
-    )
+    if self_correct_k > 0:  # author-time base-validation loop (red-first self-correction, blind to gold)
+        from hit_sdd_e2.authored_spec.base_validation import author_spec_self_correcting
+        log(f"[{iid}] author (blind) + base-validation loop (k={self_correct_k}) + openspec validate")
+        draft = author_spec_self_correcting(
+            instance=instance, issue_text=instance["problem_statement"],
+            public_surface_summary=public_surface_summary, complete=complete,
+            bundle_root=bundle_root, image=image, k=self_correct_k, log=log,
+        )
+    else:
+        log(f"[{iid}] author (blind) + openspec validate")
+        draft = author_spec(
+            instance_id=iid, issue_text=instance["problem_statement"],
+            public_surface_summary=public_surface_summary, complete=complete,
+        )
     ov = validate(draft.openspec_proposal, spec_id=_spec_slug(iid))
     result = TaskResult(instance_id=iid, n_scenarios=len(draft.scenarios), n_dropped=len(draft.dropped),
                         openspec_valid=bool(ov.get("passed")))
