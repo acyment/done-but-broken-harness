@@ -4,148 +4,140 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
+import sys
+
+import pytest
 
 from hit_sdd_e2.authored_spec.authoring import (
-    BUSINESS_PROMPT_V2,
-    DEV_PROMPT_V2,
-    QA_PROMPT_V2,
+    BUSINESS_PROMPT_V3,
+    DEV_PROMPT_V3,
+    QA_PROMPT_V3,
+    _canonical_surface,
     _extract_json,
     author_spec,
     render_openspec_proposal,
 )
+from hit_sdd_e2.authored_spec.gherkin import GherkinScenario, render_step_module
+from hit_sdd_e2.authored_spec.openspec import openspec_to_feature, parse_openspec_scenarios
 
 CHECK_NAME_RE = re.compile(r"[A-Za-z0-9_.:-]+")
 
 
 def _fake_completer(business: dict, qa: dict, dev: dict):
-    """Dispatch by role-prompt sentinel so the fake is order-independent."""
-
     def complete(prompt: str) -> str:
-        if BUSINESS_PROMPT_V2[:40] in prompt:
+        if BUSINESS_PROMPT_V3[:40] in prompt:
             return "```json\n" + json.dumps(business) + "\n```"
-        if QA_PROMPT_V2[:40] in prompt:
+        if QA_PROMPT_V3[:40] in prompt:
             return json.dumps(qa)
-        if DEV_PROMPT_V2[:40] in prompt:
-            return "here is the binding:\n" + json.dumps(dev)
+        if DEV_PROMPT_V3[:40] in prompt:
+            return "here:\n" + json.dumps(dev)
         raise AssertionError("unexpected prompt")
 
     return complete
 
 
 BUSINESS = {
-    "requirement": "Reject empty payloads with HTTP 400.",
-    "why": "Clients send empty bodies and currently get a 500.",
-    "scenarios": [{"name": "empty payload rejected", "when": "POST /widgets with {}", "then": "responds 400"}],
+    "requirement": "add(a, b) returns the sum.",
+    "why": "Callers need addition.",
+    "scenarios": [
+        {"title": "adds two numbers", "steps": [
+            {"keyword": "when", "text": "two numbers are added"},
+            {"keyword": "then", "text": "the result is their sum"}]},
+    ],
 }
 QA = {
     "scenarios": [
-        {"name": "empty payload rejected", "when": "POST /widgets with {}", "then": "responds 400"},
-        {"name": "internal cache primed", "when": "POST /widgets", "then": "cache holds the row"},
+        BUSINESS["scenarios"][0],
+        {"title": "internal counter increments", "steps": [
+            {"keyword": "when", "text": "add is called"},
+            {"keyword": "then", "text": "the internal call counter increments"}]},
     ]
 }
 DEV = {
     "bindings": [
-        {
-            "name": "empty payload rejected",
-            "surface": "http",
-            "observable": True,
-            "then_reference": "400",
-            "step_code": "resp = client.post('/widgets', json={})\nassert resp.status_code == 400",
-            "reason": "observable via HTTP status",
-        },
-        {
-            "name": "internal cache primed",
-            "surface": "public_api",
-            "observable": False,
-            "then_reference": "",
-            "step_code": "",
-            "reason": "internal cache state is not observable at the public surface",
-        },
+        {"title": "adds two numbers", "surface": "public_api", "observable": True, "imports": [],
+         "then_reference": "5", "reason": "pure computation via public API",
+         "steps": [
+             {"keyword": "when", "text": "two numbers are added", "code": "context['v'] = 2 + 3"},
+             {"keyword": "then", "text": "the result is their sum", "code": "assert context['v'] == 5"}]},
+        {"title": "internal counter increments", "surface": "public_api", "observable": False,
+         "imports": [], "then_reference": "", "reason": "internal counter not observable at the surface",
+         "steps": []},
     ]
 }
 
 
+def _draft():
+    return author_spec(instance_id="demo__repo-1", issue_text="add(a,b) should return a+b.",
+                       public_surface_summary="Python API: from calc import add", complete=_fake_completer(BUSINESS, QA, DEV))
+
+
 def test_author_spec_keeps_observable_drops_white_box():
-    draft = author_spec(
-        instance_id="demo__repo-1",
-        issue_text="Empty payloads should be rejected with 400, not 500.",
-        public_surface_summary="HTTP API: POST /widgets",
-        complete=_fake_completer(BUSINESS, QA, DEV),
-    )
+    draft = _draft()
     assert len(draft.scenarios) == 1
     sc = draft.scenarios[0]
-    assert sc.surface == "http"
-    assert sc.then_reference == "400"
-    assert CHECK_NAME_RE.fullmatch(sc.name)  # manifest-valid name
-    assert sc.name == "empty_payload_rejected"
-    assert [d["name"] for d in draft.dropped] == ["internal cache primed"]
+    assert isinstance(sc, GherkinScenario)
+    assert sc.name == "adds_two_numbers" and CHECK_NAME_RE.fullmatch(sc.name)
+    assert sc.surface == "public_api" and sc.then_reference == "5"
+    assert [st.keyword for st in sc.steps] == ["when", "then"]
+    assert any(st.code for st in sc.steps)
+    assert [d["title"] for d in draft.dropped] == ["internal counter increments"]
 
 
-def test_author_spec_proposal_and_transcript():
-    draft = author_spec(
-        instance_id="demo__repo-1",
-        issue_text="Empty payloads should be rejected with 400.",
-        public_surface_summary="HTTP API: POST /widgets",
-        complete=_fake_completer(BUSINESS, QA, DEV),
-    )
-    assert "#### Scenario:" in draft.openspec_proposal
-    assert "- WHEN " in draft.openspec_proposal and "- THEN " in draft.openspec_proposal
-    td = draft.transcript.to_dict()
-    assert td["schema_version"] == "authored-spec-authoring-transcript-v2"
-    assert td["transcript_hash"]
-    roles = [m["role"] for m in td["messages"]]
-    assert roles == ["business", "qa", "dev", "reconcile"]
+def test_openspec_proposal_is_real_and_parseable():
+    draft = _draft()
+    p = draft.openspec_proposal
+    assert "## Requirements" in p and "### Requirement: add(a, b) returns the sum." in p
+    assert "#### Scenario: adds two numbers" in p
+    assert "- **WHEN** two numbers are added" in p and "- **THEN** the result is their sum" in p
+    # round-trips through the JIT converter's parser
+    parsed = parse_openspec_scenarios(p)
+    assert [s.title for s in parsed] == ["adds two numbers"]
 
 
 def test_transcript_hash_deterministic():
-    kw = dict(
-        instance_id="demo__repo-1",
-        issue_text="Empty payloads -> 400.",
-        public_surface_summary="HTTP API: POST /widgets",
-    )
-    a = author_spec(complete=_fake_completer(BUSINESS, QA, DEV), **kw).transcript.to_dict()
-    b = author_spec(complete=_fake_completer(BUSINESS, QA, DEV), **kw).transcript.to_dict()
+    a = _draft().transcript.to_dict()
+    b = _draft().transcript.to_dict()
+    assert a["schema_version"] == "authored-spec-authoring-transcript-v3"
     assert a["transcript_hash"] == b["transcript_hash"]
-
-
-def test_canonical_surface_tolerates_prose():
-    from hit_sdd_e2.authored_spec.authoring import _canonical_surface
-
-    assert _canonical_surface("public_api") == "public_api"
-    assert _canonical_surface("Python public API: from x import y") == "public_api"
-    assert _canonical_surface("HTTP API: POST /x") == "http"
-    assert _canonical_surface("CLI subprocess") == "cli"
-    assert _canonical_surface("???") == ""
-
-
-def test_author_spec_keeps_binding_with_prose_surface():
-    business = {"requirement": "r", "why": "w", "scenarios": [{"name": "rejects empty", "when": "w", "then": "400"}]}
-    qa = {"scenarios": business["scenarios"]}
-    dev = {"bindings": [{
-        "name": "rejects empty", "surface": "Python public API import", "observable": True,
-        "then_reference": "400", "step_code": "assert resp.status_code == 400", "reason": "ok",
-    }]}
-    draft = author_spec(
-        instance_id="x", issue_text="i", public_surface_summary="s",
-        complete=_fake_completer(business, qa, dev),
-    )
-    assert len(draft.scenarios) == 1
-    assert draft.scenarios[0].surface == "public_api"
 
 
 def test_extract_json_tolerates_fences_and_prose():
     assert _extract_json("```json\n{\"a\": 1}\n```") == {"a": 1}
-    assert _extract_json("sure, here:\n{\"a\": [1, 2]}\nthanks") == {"a": [1, 2]}
+    assert _extract_json("sure:\n{\"a\": [1, 2]}\nthanks") == {"a": [1, 2]}
 
 
-def test_render_proposal_has_openspec_shape():
-    from hit_sdd_e2.authored_spec.authoring import AuthoredScenario
+def test_canonical_surface_tolerates_prose():
+    assert _canonical_surface("Python public API import") == "public_api"
+    assert _canonical_surface("HTTP endpoint") == "http"
+    assert _canonical_surface("???") == ""
 
-    text = render_openspec_proposal(
-        requirement="Reject empty payloads.",
-        why="They cause 500s.",
-        scenarios=(AuthoredScenario("empty_rejected", "POST {}", "responds 400", "400", "http", "..."),),
+
+def test_render_openspec_proposal_shape():
+    text = render_openspec_proposal(requirement="R", why="W", scenarios=())
+    assert text.startswith("## Why") and "## Requirements" in text and "### Requirement: R" in text
+
+
+def _bdd_runnable() -> bool:
+    try:
+        import pytest_bdd  # noqa: F401
+    except ImportError:
+        return False
+    return int(pytest.__version__.split(".")[0]) < 9
+
+
+@pytest.mark.skipif(not _bdd_runnable(), reason="requires pytest-bdd + pytest<9")
+def test_authored_output_runs_through_converter_and_pytest_bdd(tmp_path):
+    """Full authoring chain with a fake author: OpenSpec -> JIT .feature -> pytest-bdd, green."""
+    draft = _draft()
+    (tmp_path / "spec.feature").write_text(openspec_to_feature(draft.openspec_proposal, feature="calc"))
+    checks = tmp_path / "checks"
+    checks.mkdir()
+    sc = draft.scenarios[0]
+    (checks / f"{sc.name}.py").write_text(render_step_module(sc, feature_ref="../spec.feature"))
+    proc = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", str(checks / f"{sc.name}.py")],
+        cwd=tmp_path, capture_output=True, text=True, timeout=120,
     )
-    assert text.startswith("## Why")
-    assert "## Requirement" in text
-    assert "#### Scenario: empty_rejected" in text
+    assert proc.returncode == 0, f"{sc.title} failed:\n{proc.stdout}\n{proc.stderr}"
