@@ -116,7 +116,8 @@ def test_canonical_surface_tolerates_prose():
 
 def test_render_openspec_proposal_shape():
     text = render_openspec_proposal(requirement="R", why="W", scenarios=())
-    assert text.startswith("## Why") and "## Requirements" in text and "### Requirement: R" in text
+    assert text.startswith("## Purpose") and "## Requirements" in text and "### Requirement: R" in text
+    assert "SHALL" in text  # requirement description must carry a normative keyword for openspec --strict
 
 
 def _bdd_runnable() -> bool:

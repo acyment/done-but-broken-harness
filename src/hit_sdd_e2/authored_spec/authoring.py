@@ -297,9 +297,14 @@ def author_spec(
 
 
 def render_openspec_proposal(*, requirement: str, why: str, scenarios: tuple[GherkinScenario, ...]) -> str:
-    """Render a real OpenSpec change proposal (canonical sealed artifact) the JIT converter can parse."""
-    lines = ["## Why", "", why or "(none stated)", "", "## Requirements", "",
-             f"### Requirement: {requirement or '(unnamed)'}"]
+    """Render a valid OpenSpec spec-of-record (canonical sealed artifact) the JIT converter can parse.
+
+    `openspec validate --strict` requires a `## Purpose` section and a `## Requirements` section with
+    `### Requirement:` + `#### Scenario:` + bolded WHEN/THEN. The rationale (`why`) fills Purpose.
+    """
+    lines = ["## Purpose", "", why or "(none stated)", "", "## Requirements", "",
+             f"### Requirement: {requirement or '(unnamed)'}",
+             "The implementation SHALL satisfy every scenario in this requirement."]
     for sc in scenarios:
         lines += ["", f"#### Scenario: {sc.title}", ""]
         for step in sc.steps:
