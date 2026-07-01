@@ -40,7 +40,11 @@ from hit_sdd_e2.authored_spec.manifest import (
     audit_black_box_discipline,
     validate_scenario_count,
 )
-from hit_sdd_e2.authored_spec.scoring import score_authored_spec_candidate
+from hit_sdd_e2.authored_spec.scoring import (
+    score_authored_spec_candidate,
+    summarize_run_spec_use,
+    task_class,
+)
 
 
 # --- fixtures ---------------------------------------------------------------------------------------
@@ -351,3 +355,58 @@ def test_score_no_gap_when_resolved(tmp_path):
     )
     assert rec.resolved is True
     assert rec.self_verification_gap is False
+
+
+# --- detection-only reconciliation (Addendum B: gap_gold, task_class, run_spec tool-use) ------------
+
+def _fake_gold(resolved):
+    from types import SimpleNamespace
+
+    def scorer(instance, patch, *, arm, declared_done, self_verification_passed, image, timeout):
+        return SimpleNamespace(resolved=resolved, p2p_regression_count=0, p2p_regressions=(),
+                               self_verification_gap=not resolved)
+    return scorer
+
+
+def test_task_class_labels():
+    assert task_class("mlco2__codecarbon-831") == "bug"
+    assert task_class("pypa__twine-1249") == "feature"
+    assert task_class("celery__kombu-2300") == "mixed"
+    assert task_class("unknown__x-1") == ""
+
+
+def test_summarize_run_spec_use():
+    # a failing check followed by an edit (changed diff) -> check-driven
+    driven = [{"n_failed": 2, "n_total": 3, "diff_hash": "a"}, {"n_failed": 0, "n_total": 3, "diff_hash": "b"}]
+    assert summarize_run_spec_use(driven) == {"run_spec_calls": 2, "run_spec_check_driven": True}
+    # failures but no later edit -> not check-driven
+    assert summarize_run_spec_use([{"n_failed": 1, "n_total": 2, "diff_hash": "a"}])["run_spec_check_driven"] is False
+    # all-pass calls -> not check-driven; empty -> zero calls
+    allpass = [{"n_failed": 0, "n_total": 2, "diff_hash": "a"}, {"n_failed": 0, "n_total": 2, "diff_hash": "b"}]
+    assert summarize_run_spec_use(allpass)["run_spec_check_driven"] is False
+    assert summarize_run_spec_use([]) == {"run_spec_calls": 0, "run_spec_check_driven": False}
+
+
+def test_gap_gold_and_task_class_on_record(tmp_path):
+    # authored spec PASSES (resolved) but GOLD fails while declared done -> teaching-to-the-test guard fires
+    rec = score_authored_spec_candidate(
+        _instance(), "CANDIDATE-DIFF",
+        arm="treatment", declared_done=True, self_verification_passed=True,
+        bundle=_write_checks_manifest(tmp_path), bundle_root=str(tmp_path),
+        spec_runner=_runner({"c1": PASS}, {}), gold_scorer=_fake_gold(resolved=False),
+        run_spec_calls=3, run_spec_check_driven=True,
+    )
+    assert rec.resolved is True and rec.gap_gold is True
+    assert rec.task_class == "bug"  # mlco2__codecarbon-831
+    assert rec.run_spec_calls == 3 and rec.run_spec_check_driven is True
+    assert rec.to_dict()["gap_gold"] is True
+
+
+def test_gap_gold_false_when_gold_resolved(tmp_path):
+    rec = score_authored_spec_candidate(
+        _instance(), "CANDIDATE-DIFF",
+        arm="treatment", declared_done=True, self_verification_passed=True,
+        bundle=_write_checks_manifest(tmp_path), bundle_root=str(tmp_path),
+        spec_runner=_runner({"c1": PASS}, {}), gold_scorer=_fake_gold(resolved=True),
+    )
+    assert rec.gap_gold is False

@@ -7,7 +7,12 @@ from hit_sdd_e2.authored_spec.bundle import (
 )
 from hit_sdd_e2.authored_spec.compiler import compile_draft
 from hit_sdd_e2.authored_spec.manifest import AuthoredCheck, CheckManifest
-from hit_sdd_e2.authored_spec.scoring import AuthoredSpecScoreRecord, score_authored_spec_candidate
+from hit_sdd_e2.authored_spec.scoring import (
+    AuthoredSpecScoreRecord,
+    score_authored_spec_candidate,
+    summarize_run_spec_use,
+    task_class,
+)
 from hit_sdd_e2.authored_spec.validate import openspec_available, openspec_validate
 
 __all__ = [
@@ -21,4 +26,6 @@ __all__ = [
     "openspec_available",
     "openspec_validate",
     "score_authored_spec_candidate",
+    "summarize_run_spec_use",
+    "task_class",
 ]

@@ -18,11 +18,13 @@ from openhands.sdk.tool import (
 
 from hit_sdd_e2.authored_spec.bundle import AuthoredSpecBundle
 from hit_sdd_e2.authored_spec.execution import (
+    PASS,
     format_check_results,
     run_authored_spec,
     sanitize_check_results,
 )
 from hit_sdd_e2.authored_spec.manifest import CheckManifest
+from hit_sdd_e2.provenance.hashing import hash_text
 
 RUN_SPEC_TOOL_NAME = "run_spec"
 
@@ -42,12 +44,14 @@ class _RunSpecExecutor(ToolExecutor):
         self.image = image
         self.bundle = bundle
         self.bundle_root = bundle_root
+        self.calls: list[dict] = []  # B7 tool-use log: per-call {n_failed, n_total, diff_hash}
 
     def __call__(self, action: RunSpecAction, conversation=None) -> RunSpecObservation:  # noqa: ANN001
         diff = subprocess.run(
             ["git", "-C", self.working_dir, "diff"], capture_output=True, text=True
         ).stdout
         if not diff.strip():
+            self.calls.append({"n_failed": 0, "n_total": 0, "diff_hash": ""})
             return RunSpecObservation.from_text(
                 "No changes to check yet. Edit the source first, then call run_spec.", results={}
             )
@@ -62,6 +66,11 @@ class _RunSpecExecutor(ToolExecutor):
             timeout=480,
         )
         results = sanitize_check_results(raw, expected_names=expected)
+        self.calls.append({
+            "n_failed": sum(1 for v in results.values() if v != PASS),
+            "n_total": len(results),
+            "diff_hash": hash_text(diff),
+        })
         return RunSpecObservation.from_text(format_check_results(results), results=results)
 
 
